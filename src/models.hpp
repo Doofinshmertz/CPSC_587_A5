@@ -138,19 +138,19 @@ private:
 	float bound_z = 100.0f;
 
 	// the number of bins in the x,y,z directions
-	size_t bins_x;
-	size_t bins_y;
-	size_t bins_z;
-	size_t num_per_bin;
+	int32_t bins_x;
+	int32_t bins_y;
+	int32_t bins_z;
+	int32_t num_per_bin;
 	
 	// use for array indexing
-	size_t x_jump; // value needed to jump forward by one bin in the x direction
-	size_t y_jump; // value needed to jump forward by one bin in the y direction
-	size_t z_jump; // value needed to jump forward by one bin in the z direction
+	int32_t x_jump; // value needed to jump forward by one bin in the x direction
+	int32_t y_jump; // value needed to jump forward by one bin in the y direction
+	int32_t z_jump; // value needed to jump forward by one bin in the z direction
 
 	// the factors to multipy x and y by to get the correct cell index
-	size_t x_fact;
-	size_t y_fact;
+	int32_t x_fact;
+	int32_t y_fact;
 
 	// the location of one all negative corner of the uniform grid 
 	float origin_x;
@@ -160,7 +160,7 @@ private:
 	// simulation controlls
 	bool new_buffers = false;
 	// the time elapsed since the last buffer swap
-	float elapsed_time = 0.0f;
+	std::atomic<float> elapsed_time = 0.0f;
 	std::atomic<float> delta_time = 0.0f; // the time difference between the last two simulation steps
 	// if the simulation should be paused
 	std::atomic<bool> is_paused = true;
@@ -174,6 +174,7 @@ private:
 
 	// the uniform grid (flattened, indexed by x*(bins_y*bins_z*num_per_bin) + y*bins_z*num_per_bin + z * num_per_bin + <index_in_bin> + 1 (the first element in each bin stores how full the bin is)
 	std::vector<uint32_t> uniform_grid;
+	size_t num_cells;
 	size_t num_bins;
 
 	std::unordered_map<size_t, std::vector<Collider*>> collider_map;
@@ -242,7 +243,17 @@ private:
 	void SimulationLoop();
 
 	// the simulation function that runs in a thread
-	void SimulateBoids(size_t thread_id);
+	void SimulateBoids(size_t thread_id, float dt);
+
+	// calculate the acceleration for a plane that is in range
+	void HandlePlane(Boid* boid, Plane* plane, glm::vec3* acc);
+	// calculate the acceleration for a sphere that is in range
+	void HandleSphere(Boid *boid, Sphere *sphere, glm::vec3 *acc);
+	// calculate the effect of a boid on another boid
+	void HandleBoid(Boid *boid, Boid *other, glm::vec3 *acc);
+
+	// different from sort into grid (much faster since it uses pre-calculated cell indices from the boids)
+	void UpdateGrid();
 
 	// the rendering function
 	void AddBoidRenderable(size_t thread_id);

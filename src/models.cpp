@@ -54,7 +54,7 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 	k_repulsion = _k_repulsion;
 	max_speed = _max_speed;
 	max_acc = _max_acceleration;
-	num_boids = _num_boids;
+
 
 	// need to re-calculate grid spacing
 	// re-initialze the boids
@@ -62,10 +62,14 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 	// if a simulation was already running, restart it, otherwise do not
 	if((stop_simulation == false) || main_loop_thread.joinable())
 	{
+		printf("re setting setings\n");
 		// set stop simulation to true
 		stop_simulation = true;
 
 		main_loop_thread.join();
+		num_boids = _num_boids; // this was one hell of a race condition to find
+
+		printf("main loop should have stopped\n");
 		SetupSimulation();
 		stop_simulation = false;
 
@@ -74,6 +78,7 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 	}
 	else
 	{
+		num_boids = _num_boids;
 		printf("starting simulation\n");
 		// reset the boid positions
 		SetupSimulation();
@@ -117,14 +122,11 @@ void BoidSimulation::step(float dt)
 
 void BoidSimulation::SimulationLoop()
 {
-
-	printf("simulation started\n");
 	// setup time measurement variables
 	std::chrono::steady_clock::time_point start_t = std::chrono::steady_clock::now();
 	std::chrono::steady_clock::time_point end_t = start_t;
 	delta_time = 0.01f; // starting delta time, we don't what this to be equal to zero
-	
-	float del = 0.0f;
+
 	// while stop simulation is not true, 
 	while(!stop_simulation)
 	{
@@ -135,40 +137,269 @@ void BoidSimulation::SimulationLoop()
 			continue;
 		}
 
-		SortIntoGrid();
-
+		// acceleration step
 		// dispatch threads
+		float del = delta_time;
+		for (size_t i = 0; i < SIMULATION_THREADS; i++)
+		{
+			threads_sim[i] = std::thread(&BoidSimulation::SimulateBoids, this, i, del);
+		}
 		// join threads
+		for (size_t i = 0; i < SIMULATION_THREADS; i++)
+		{
+			threads_sim[i].join();
+		}
 
-		// swap buffers
-		std::vector<Boid>* temp = end_positions;
+		//ResetBoidPositions();
 		
-		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		// update the grid
+		UpdateGrid();
+		
+		// swap buffers
+		std::vector<Boid>* temp = start_positions.load();
+		start_positions = end_positions.load();
+		end_positions = to_positions.load();
+		to_positions = temp;
+
+		// reset the elapsed time
+		elapsed_time = 0.0f;
+
 		// measure the time step
 		end_t = std::chrono::steady_clock::now();
 		delta_time = (std::chrono::duration<float, std::ratio<1>>(end_t - start_t)).count();
 		start_t = end_t;
-
-		del = delta_time;
-
-
 	}
-
-	printf("simulation stopped\n");
 }
 
-void BoidSimulation::SimulateBoids(size_t thread_id)
+void BoidSimulation::UpdateGrid()
+{
+	std::vector<Boid>* boids = to_positions;
+	// set all grid fill values to zero
+	for (size_t i = 0; i < (num_cells); i++)
+	{
+		size_t cell = i * num_per_bin;
+		uniform_grid[cell] = 0;
+	}
+
+	// for each boid, place it into an appropriate cell on the uniform grid
+	for (size_t i = 0; i < num_boids; i++)
+	{
+		Boid *boid = &(*boids)[i];
+		size_t cell = boid->cell_index;
+
+		// place this value in the uniform grid
+		// calculate the position of the first index in the cell
+		cell = (cell * num_per_bin) % num_bins;
+		// the fill is located at the first index in the cell
+		uint32_t fill = ++uniform_grid[cell];
+
+		// if the offset is greater that or equal the available positions in the cell
+		// then travers in the z direction until we find a cell with vacancy
+		if (fill >= num_per_bin)
+		{
+			while (fill >= num_per_bin)
+			{
+				uniform_grid[cell]--;
+				cell = (cell + num_per_bin) % num_bins;
+				fill = ++uniform_grid[cell];
+			}
+		}
+
+		// place the index of this boid into this cell
+		uniform_grid[cell + fill] = i;
+	}
+}
+
+void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 {
 	size_t start = sim_tasks[thread_id].start_index;
 	size_t end = sim_tasks[thread_id].end_index;
 
+	std::vector<Boid> *boids_to = to_positions.load();
+	std::vector<Boid> *boids_end = end_positions.load();
+
 	for(size_t i = start; i < end; i++)
 	{
-		// first compute wall
-		// iterate over potential neighbors
-		// if is neighbor, then calculate appropriate forces
+
+		// get the current boid
+		Boid *boid = &(*boids_end)[i];
+		int64_t cell = boid->cell_index;
+
+		// the acceleration accumulator
+		glm::vec3 acc(0.0f, 0.0f, 0.0f);
 		
+		// check the cell along with the surrounding cells
+		// iterate over the x coordinate
+
+		// if we detect an object, avoid it before considering the 3 urges
+		bool avoiding_object = false;
+		for(int32_t x_idx = -x_fact; x_idx <= x_fact; x_idx += x_fact)
+		{
+			// iterate over the y coordinate
+			for(int32_t y_idx = -y_fact; y_idx <= y_fact; y_idx += y_fact)
+			{
+
+				// iterate over the z coordinate
+				for(int32_t z_idx = -1; z_idx <= 1; z_idx++)
+				{
+					// the cell key
+					size_t key = cell + x_idx + y_idx +z_idx;
+
+					// check for colliders first
+					if(collider_map.contains(key))
+					{
+						avoiding_object = true;
+						std::vector<Collider*>* colliders = &collider_map[key];
+
+						for(uint32_t i = 0; i < colliders->size(); i++)
+						{
+							Collider* ptr = (*colliders)[i];
+							// iterate over potential colliders at this position
+							if (ptr->type == ColliderType::C_Plane)
+							{
+								Plane *c = static_cast<Plane *>(ptr);
+								HandlePlane(boid, c, &acc);
+							}
+							else
+							{
+								Sphere *c = static_cast<Sphere *>(ptr);
+								HandleSphere(boid,c, &acc);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// if we are not avoiding an object, then calculate the 3 urges
+		if(!avoiding_object)
+		{
+			for (int32_t x_idx = -x_fact; x_idx <= x_fact; x_idx += x_fact)
+			{
+				// iterate over the y coordinate
+				for (int32_t y_idx = -y_fact; y_idx <= y_fact; y_idx += y_fact)
+				{
+
+					// iterate over the z coordinate
+					for (int32_t z_idx = -1; z_idx <= 1; z_idx++)
+					{
+						// the cell key
+						size_t key = ((cell + x_idx + y_idx + z_idx) % num_cells)*num_per_bin;			
+
+						// for each boid in this cell calculate its effect on the current boid
+						size_t fill = uniform_grid[key];
+
+						for (size_t j = key + 1; j <= key + fill; j++)
+						{
+							Boid *other = &((*boids_end)[uniform_grid[j]]);
+							HandleBoid(boid, other, &acc);
+						}
+					}
+				}
+			}
+		}
+
+		// bound the acceleration to a maximum value
+		float acc_m = acc.x * acc.x + acc.y * acc.y + acc.z * acc.z;
+		if (acc_m > (max_acc * max_acc))
+		{
+			acc = acc * max_acc / glm::sqrt(acc_m);
+		}
+
+
+
+		// calculate the new velocity
+		glm::vec3 v = boid->v + acc*dt;
+
+		// bound the new velocity
+		float v_m = v.x * v.x + v.y * v.y + v.z * v.z;
+		if(v_m > (max_speed * max_speed))
+		{
+			v = v * max_speed / glm::sqrt(v_m);
+		}
+		
+		// calculate the new position
+		glm::vec3 p = boid->p + v*dt;
+
+		// bound the new position
+		if(p.x > bound_x)
+		{
+			p.x = bound_x - offset;
+		}
+		if(p.x < -bound_x)
+		{
+			p.x = offset - bound_x;
+		}
+
+		if (p.y > bound_y)
+		{
+			p.y = bound_y - offset;
+		}
+		if (p.y < -bound_y)
+		{
+			p.y = offset - bound_y;
+		}
+
+		if (p.z > bound_z)
+		{
+			p.z = bound_z - offset;
+		}
+		if (p.z < -bound_z)
+		{
+			p.z = offset - bound_z;
+		}
+		// get the new boid
+		Boid *boid_to = &(*boids_to)[i];
+
+		boid_to->v = v;
+		boid_to->p = p;
+		// calculate the new cell
+		// convert the position to the cell grid position
+		size_t index_x = (p.x - origin_x) * max_r_inv;
+		size_t index_y = (p.y - origin_y) * max_r_inv;
+		size_t index_z = (p.z - origin_z) * max_r_inv;
+
+		boid_to->cell_index = index_x * x_fact + index_y * y_fact + index_z;
 	}
+}
+
+
+void BoidSimulation::HandlePlane(Boid *boid, Plane *plane, glm::vec3* acc)
+{
+
+	
+	glm::vec3 p(1.0f, 1.0f, 1.0f);
+	glm::vec3 p2(1.0f, 1.0f, 1.0f);
+	glm::vec3 p3(1.0f, 1.0f, 1.0f);
+
+	p = p / glm::length(p2);
+	p2 = glm::dot(p, p3) * p2;
+
+	*acc += p2;
+}
+
+void BoidSimulation::HandleSphere(Boid *boid, Sphere *sphere, glm::vec3 *acc)
+{
+	glm::vec3 p(1.0f, 1.0f, 1.0f);
+	glm::vec3 p2(1.0f, 1.0f, 1.0f);
+	glm::vec3 p3(1.0f, 1.0f, 1.0f);
+
+	p = p / glm::length(p2);
+	p2 = glm::dot(p, p3) * p2;
+
+	*acc += p2;
+}
+
+void BoidSimulation::HandleBoid(Boid *boid, Boid *other, glm::vec3 *acc)
+{
+	glm::vec3 p(1.0f, 1.0f, 1.0f);
+	glm::vec3 p2(1.0f, 1.0f, 1.0f);
+	glm::vec3 p3(1.0f, 1.0f, 1.0f);
+
+	p = p / glm::length(p2);
+	p2 = glm::dot(p, p3) * p2;
+
+	*acc += p2;
 }
 
 float BoidSimulation::GetDeltatime()
@@ -204,8 +435,6 @@ void BoidSimulation::render(const ModelViewContext &view)
 	{
 		givr::style::draw(boid_render[i], view);
 	}
-
-	ResetBoidPositions();
 }
 
 void BoidSimulation::AddBoidRenderable(size_t thread_id)
@@ -213,11 +442,14 @@ void BoidSimulation::AddBoidRenderable(size_t thread_id)
 	size_t start = rendering_tasks[thread_id].start_index;
 	size_t end = rendering_tasks[thread_id].end_index;
 
+	std::vector<Boid>* boids_start = start_positions;
+	std::vector<Boid>* boids_end = end_positions;
+
 	if(start == end){ return;}
 	// render the boids in between the given indices
 	for(size_t i = start; i < end; i++)
 	{
-		givr::addInstance(boid_render[thread_id], glm::translate(glm::mat4(1.0f), boids_a[i].p));
+		givr::addInstance(boid_render[thread_id], glm::translate(glm::mat4(1.0f), (*boids_start)[i].p));
 	}
 }
 
@@ -242,9 +474,9 @@ void BoidSimulation::SetupBoids()
 	boids_c.resize(num_boids);
 
 	// set the arrays for rendering and simulation
-	start_positions = &boids_a;
-	end_positions = &boids_b;
-	to_positions = &boids_c;
+	start_positions.store(&boids_a);
+	end_positions.store(&boids_b);
+	to_positions.store(&boids_c);
 
 	// starting configuration for the renderer
 	new_buffers = true;
@@ -277,6 +509,8 @@ void BoidSimulation::SetupBoids()
 	// used for finding cell indices
 	x_fact = bins_y * bins_z;
 	y_fact = bins_z;
+
+	num_cells = x_fact*bins_x;
 
 	num_bins = x_jump*bins_x;
 	// initialize the uniform grid
