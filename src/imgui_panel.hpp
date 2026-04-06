@@ -50,5 +50,10 @@ namespace imgui_panel {
 
 	extern bool play_pause;
 
+	extern float bounds[3];
+	extern int num_spheres;
+	extern float sphere_max_r;
+	extern float sphere_min_r;
+
 	extern float sim_delta;
 } // namespace panel

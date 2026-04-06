@@ -13,7 +13,7 @@ namespace imgui_panel {
 	bool step_simulation = false;
 	float dt_simulation = 0.001f;
 	bool enable_validity_check = true;
-	int n_boids = 100;
+	int n_boids = 1500;
 
 	// Simulation State
 	bool valid_simulation = true;
@@ -26,13 +26,13 @@ namespace imgui_panel {
 	float angle_align = 140.0f;
 	float angle_coh = 120.0f;
 
-	float r_sep = 3.0f;
-	float r_align = 4.0f;
+	float r_sep = 6.0f;
+	float r_align = 8.0f;
 	float r_coh = 10.0f;
 
-	float k_sep = 1.0f;
-	float k_align = 0.4f;
-	float k_coh = 0.2f;
+	float k_sep = 10.0f;
+	float k_align = 2.0f;
+	float k_coh = 0.4f;
 	
 	float offset = 1.0f;
 	float k_repulsion = 3.0f;
@@ -44,6 +44,11 @@ namespace imgui_panel {
 	bool play_pause = false;
 
 	float sim_delta = 0.0f;
+
+	float bounds[3] = {100.0f, 100.0f, 100.0f};
+	int num_spheres = 14;
+	float sphere_max_r = 10.0f;
+	float sphere_min_r = 4.0f;
 
 	std::function<void(void)> draw = [](void) {
 		if (showPanel) {
@@ -88,7 +93,7 @@ namespace imgui_panel {
 				ImGui::Spacing();
 
 				// acceleration factors
-				ImGui::DragFloat("K separation", &k_sep, 0.01f, 0.0f, 10.0f);
+				ImGui::DragFloat("K separation", &k_sep, 0.01f, 0.0f, 100.0f);
 				ImGui::DragFloat("K alignment", &k_align, 0.01f, 0.0f, 10.0f);
 				ImGui::DragFloat("K cohesion", &k_coh, 0.01f, 0.0f, 10.0f);
 				ImGui::Spacing();
@@ -100,7 +105,46 @@ namespace imgui_panel {
 				ImGui::DragFloat("Max speed", &max_speed, 0.1f, 1.0f, 100.0f);
 				ImGui::DragFloat("Max acceleration", &max_acceleration, 0.1f, 1.0f, 1000.0f);
 
+				ImGui::Spacing();
+				if(ImGui::InputFloat3("bounds", bounds))
+				{
+					for(int i = 0; i < 3; i++)
+					{
+						if(bounds[i] < 5.0f)
+						{
+							bounds[i] = 5.0f;
+						}
+						else if(bounds[i] > 200.0f)
+						{
+							bounds[i] = 200.0f;
+						}
+					}
+				}
+				if(ImGui::InputInt("Number of spheres", &num_spheres))
+				{
+					if(num_spheres < 14)
+					{
+						num_spheres = 14;
+					}
+					else if(num_spheres > 100)
+					{
+						num_spheres = 100;
+					}
+				}
+
+				ImGui::DragFloat("Sphere max Radius", &sphere_max_r, 0.1f, 1.0f, 100.0f);
+				ImGui::DragFloat("Sphere min Radius", &sphere_min_r, 0.1f, 1.0f, 100.0f);
+				
+
 				apply_settings = ImGui::Button("Apply Settings");
+				if(apply_settings)
+				{
+					if(sphere_max_r < sphere_min_r)
+					{
+						sphere_max_r =20.0f;
+						sphere_min_r = 5.0f;
+					}
+				}
 				
 				ImGui::Spacing();
 				ImGui::Separator();

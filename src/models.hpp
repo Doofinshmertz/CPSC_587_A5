@@ -12,21 +12,22 @@
 
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 #include <unordered_map>
 
-#define SPHERE_MAXR 10.0f
-#define SPHERE_MINR 3.0f
-#define NUM_SPHERES 24
+#define SPHERE_MAXR 4.0f
+#define SPHERE_MINR 2.0f
+#define NUM_SPHERES 8
 
 #define SIMULATION_THREADS 16
 #define RENDER_THREADS 8
 
-#define MAX_NEIGHBORS 32// the maximum number of neighbors to consider
+#define MAX_NEIGHBORS 256// the maximum number of neighbors to consider
 
-#define X_SIZE 30.0f
-#define Y_SIZE 40.0f
-#define Z_SIZE 25.0f
+#define X_SIZE 20.0f
+#define Y_SIZE 20.0f
+#define Z_SIZE 20.0f
 
 enum ColliderType
 {
@@ -143,6 +144,10 @@ private:
 	float bound_y = Y_SIZE;
 	float bound_z = Z_SIZE;
 
+	int num_spheres = NUM_SPHERES;
+	float sphere_max_r = SPHERE_MAXR;
+	float sphere_min_r = SPHERE_MINR;
+
 	// the number of bins in the x,y,z directions
 	int32_t bins_x;
 	int32_t bins_y;
@@ -167,6 +172,8 @@ private:
 	bool new_buffers = false;
 	// the time elapsed since the last buffer swap
 	std::atomic<float> elapsed_time = 0.0f;
+	std::chrono::steady_clock::time_point last_render_time; // the start time of the last render loop 
+	float render_delta = 0.0f; // the time it takes to complete one render loop
 	std::atomic<float> delta_time = 0.0f; // the time difference between the last two simulation steps
 	// if the simulation should be paused
 	std::atomic<bool> is_paused = true;
@@ -177,14 +184,17 @@ private:
 	CalculationTask sim_tasks[SIMULATION_THREADS];
 	// the thread for the main simulation loop
 	std::thread main_loop_thread;
-
+	// the mutex for preventing the arrays from being accessed while being swaped
+	std::mutex array_mutex;
 	// the uniform grid (flattened, indexed by x*(bins_y*bins_z*num_per_bin) + y*bins_z*num_per_bin + z * num_per_bin + <index_in_bin> + 1 (the first element in each bin stores how full the bin is)
 	std::vector<uint32_t> uniform_grid;
 	size_t num_cells;
 	size_t ugrid_len;
 
+	std::vector<std::vector<uint32_t>> hash_grid;
+
 	std::unordered_map<size_t, std::vector<Collider*>> collider_map;
-	// rendering stuff
+
 	givr::geometry::Mesh boid_geometry;
 	givr::style::Phong boid_style;
 	givr::InstancedRenderContext<givr::geometry::Mesh, givr::style::Phong> boid_render[RENDER_THREADS];
@@ -210,7 +220,9 @@ public:
 		float _r_sep, float _r_align, float _r_coh,
 		float _k_sep, float _k_align, float _k_coh,
 		float _offset, float _k_repulsion, 
-		float _max_speed, float _max_acceleration, 
+		float _max_speed, float _max_acceleration,
+		float _bounds[3],
+		int _num_spheres, float _sphere_max_r, float _sphere_min_r,  
 		size_t _num_boids);
 
 	/**
@@ -261,8 +273,10 @@ private:
 	// different from sort into grid (much faster since it uses pre-calculated cell indices from the boids)
 	void UpdateGrid();
 
+	void UpdateHashGrid();
+
 	// the rendering function
-	void AddBoidRenderable(size_t thread_id);
+	void AddBoidRenderable(size_t thread_id, float interp);
 
 	uint32_t CellFill(size_t cell_id); // get the fill value at a cell
 	uint32_t PushOnGrid(size_t cell_id, uint32_t boid_id); // add a boid to a cell

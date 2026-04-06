@@ -72,6 +72,7 @@ int main(void) {
 	// Models
 	std::unique_ptr<BoidSimulation> model = std::make_unique<BoidSimulation>();
 	// update the settings on the environment
+	// update the settings on the environment
 	model->SetSimulationParameters(				
 		imgui_panel::angle_sep
 		,imgui_panel::angle_align
@@ -86,6 +87,10 @@ int main(void) {
 		,imgui_panel::k_repulsion
 		,imgui_panel::max_speed
 		,imgui_panel::max_acceleration
+		,imgui_panel::bounds
+		,imgui_panel::num_spheres
+		,imgui_panel::sphere_max_r
+		,imgui_panel::sphere_min_r
 		,imgui_panel::n_boids);
 
 	view.camera.zoom(100.0f);
@@ -119,6 +124,10 @@ int main(void) {
 				,imgui_panel::k_repulsion
 				,imgui_panel::max_speed
 				,imgui_panel::max_acceleration
+				,imgui_panel::bounds
+				,imgui_panel::num_spheres
+				,imgui_panel::sphere_max_r
+				,imgui_panel::sphere_min_r
 				,imgui_panel::n_boids);
 		}
 

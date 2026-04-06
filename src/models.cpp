@@ -20,6 +20,7 @@ BoidSimulation::BoidSimulation()
 		boid_render[i] = givr::createInstancedRenderable(boid_geometry, boid_style);
 	}
 	sphere_render = givr::createInstancedRenderable(sphere_geometry, sphere_style);
+	
 }
 
 BoidSimulation::~BoidSimulation()
@@ -34,14 +35,17 @@ BoidSimulation::~BoidSimulation()
 
 // set the simulation parameters
 void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_align, float _angle_coh,
-							 float _r_sep, float _r_align, float _r_coh,
-							 float _k_sep, float _k_align, float _k_coh,
-							 float _offset, float _k_repulsion,
-							 float _max_speed, float _max_acceleration,
-							 size_t _num_boids)
+	float _r_sep, float _r_align, float _r_coh,
+	float _k_sep, float _k_align, float _k_coh,
+	float _offset, float _k_repulsion,
+	float _max_speed, float _max_acceleration,
+	float _bounds[3],
+	int _num_spheres, float _sphere_max_r, float _sphere_min_r,
+	size_t _num_boids)
 {
 
-
+	// reset this when the simulation is re-started
+	last_render_time = std::chrono::steady_clock::now();
 
 	// need to re-calculate grid spacing
 	// re-initialze the boids
@@ -71,6 +75,14 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 		max_acc = _max_acceleration;
 		num_boids = _num_boids; // this was one hell of a race condition to find
 
+		bound_x = _bounds[0];
+		bound_y = _bounds[1];
+		bound_z = _bounds[2];
+
+		num_spheres = _num_spheres;
+		sphere_max_r = _sphere_max_r;
+		sphere_min_r = _sphere_min_r;
+
 		printf("main loop should have stopped\n");
 		SetupSimulation();
 		stop_simulation = false;
@@ -81,9 +93,9 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 	else
 	{
 		// set all values
-		angle_sep = glm::radians(_angle_sep);
-		angle_align = glm::radians(_angle_align);
-		angle_coh = glm::radians(_angle_coh);
+		angle_sep = std::cos(glm::radians(_angle_sep));
+		angle_align = std::cos(glm::radians(_angle_align));
+		angle_coh = std::cos(glm::radians(_angle_coh));
 		r_sep = _r_sep;
 		r_align = _r_align;
 		r_coh = _r_coh;
@@ -96,6 +108,14 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 		max_acc = _max_acceleration;
 		num_boids = _num_boids; // this was one hell of a race condition to find
 
+		bound_x = _bounds[0];
+		bound_y = _bounds[1];
+		bound_z = _bounds[2];
+
+		num_spheres = _num_spheres;
+		sphere_max_r = _sphere_max_r;
+		sphere_min_r = _sphere_min_r;
+
 		printf("starting simulation\n");
 		// reset the boid positions
 		SetupSimulation();
@@ -104,6 +124,8 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 		// start the simulation loop
 		main_loop_thread = std::thread(&BoidSimulation::SimulationLoop, this);
 	}
+
+	printf("angle_sep: %f, angle align: %f, angle coh: %f\n, k_sep: %f\n", angle_sep, angle_align, angle_coh, k_sep);
 }
 
 /**
@@ -113,6 +135,9 @@ void BoidSimulation::reset()
 {
 	// set stop simulation to true
 	stop_simulation = true;
+
+	// reset this when the simulation is re-started
+	last_render_time = std::chrono::steady_clock::now();
 
 	main_loop_thread.join();
 	ResetBoidPositions();
@@ -134,7 +159,7 @@ void BoidSimulation::playSimulation()
 
 void BoidSimulation::step(float dt)
 {
-	elapsed_time += dt;
+	return;
 }
 
 void BoidSimulation::SimulationLoop()
@@ -172,14 +197,16 @@ void BoidSimulation::SimulationLoop()
 		//ResetBoidPositions();
 		
 		// update the grid
+		//UpdateHashGrid();
 		UpdateGrid();
-
+		array_mutex.lock();
 		// swap buffers
 		std::vector<Boid>* temp = start_positions.load();
 		start_positions = end_positions.load();
 		end_positions = to_positions.load();
 		to_positions = temp;
 
+		array_mutex.unlock();
 		// reset the elapsed time
 		elapsed_time = 0.0f;
 
@@ -190,6 +217,35 @@ void BoidSimulation::SimulationLoop()
 	}
 }
 
+void BoidSimulation::UpdateHashGrid()
+{
+	// set the fill values to zero
+	for (size_t i = 0; i < num_cells; i++)
+	{
+		hash_grid[i].clear();
+		hash_grid[i].reserve(num_per_cell);
+	}
+
+	// iterate over the boids and place them in appropriate cells
+	for (size_t i = 0; i < num_boids; i++)
+	{
+		// the get cell value of the current boid
+		size_t cell_index = (*to_positions)[i].cell_index % num_cells;
+		// insert into the hash grid
+		for (int x = -1; x <= 1; x++)
+		{
+			for (int y = -1; y <= 1; y++)
+			{
+				for (int z = -1; z <= 1; z++)
+				{
+					int32_t key = cell_index + x * x_fact + y * y_fact + z;
+					hash_grid[key].push_back(i);
+				}
+			}
+		}
+	}
+}
+
 void BoidSimulation::UpdateGrid()
 {
 	// set the fill values to zero
@@ -197,7 +253,6 @@ void BoidSimulation::UpdateGrid()
 	{
 		uniform_grid[i*num_per_cell] = 0;
 	}
-
 
 	// iterate over the boids and place them in appropriate cells
 	for(size_t i = 0; i < num_boids; i++)
@@ -241,7 +296,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		int64_t cell = boid->cell_index;
 
 		// the acceleration accumulator
-		glm::vec3 acc(0.0f, 0.0f, 0.0f);
+		glm::vec3 acc_obs(0.0f, 0.0f, 0.0f);
 		
 		// check the cell along with the surrounding cells
 		// iterate over the x coordinate
@@ -293,7 +348,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 									if (dist_sqr < (offset * offset))
 									{
 										// if within offset distance, apply max acceleration to prevent collision
-										acc += plane->normal * max_acc;
+										acc_obs += plane->normal * max_acc;
 									}
 									else
 									{
@@ -332,7 +387,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 										{
 											a_m = max_acc;
 										}
-										acc += a * a_m;
+										acc_obs += a * a_m;
 									}
 								}
 								//printf("tr: %lu, checkpoint 7\n", thread_id);
@@ -360,7 +415,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 										glm::vec3 normal = boid->p - sphere->point;
 										normal = normal / dist;
 										// if within offset distance, apply max acceleration to prevent collision
-										acc += normal * max_acc;
+										acc_obs += normal * max_acc;
 									}
 									else
 									{
@@ -397,7 +452,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 										{
 											a_m = max_acc;
 										}
-										acc += a_m * a_n;
+										acc_obs += a_m * a_n;
 									}
 								}
 								//printf("tr: %lu, checkpoint 9\n", thread_id);
@@ -411,17 +466,47 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 				}
 			}
 		}
-		//printf("tr: %lu, checkpoint 9.2\n", thread_id);
-		//std::cout << std::flush;
+		// printf("tr: %lu, checkpoint 9.2\n", thread_id);
+		// std::cout << std::flush;
 
-		// count the number of neighbors
+		//  count the number of neighbors
 		int32_t num_neighbors = 0;
-		// acceleration accumulator for the urges
-		glm::vec3 acc_urg(0.f, 0.f,0.f);
-		// if we are not avoiding an object, then calculate the 3 urges
-
+		
+		
+		
 		//printf("tr: %lu, checkpoint 10\n", thread_id);
 		//std::cout << std::flush;
+
+		/*
+		std::vector<uint32_t>* neighbors = &hash_grid[boid->cell_index];
+
+		glm::vec3 acc_bo(0.0f, 0.0f, 0.0f);
+		size_t n = neighbors->size();
+		for(size_t j = 0; j <n; j++)
+		{
+			// if the number of neighbors exceeds a certian number the stop
+			if (num_neighbors >= MAX_NEIGHBORS)
+			{
+				break;
+			}
+
+			// printf("acc_urg: %f, %f, %f\n", acc_urg.x, acc_urg.y, acc_urg.z);
+			Boid *other = &((*boids_end)[(*neighbors)[j]]);
+			if(other == boid){continue;}
+			glm::vec3 disp = other->p - boid->p;
+			float dist_sqr = disp.x*disp.x + disp.y*disp.y + disp.z*disp.z;
+			if(dist_sqr < (max_r * max_r))
+			{
+				acc_bo += HandleBoid(boid, other, dist_sqr);
+				num_neighbors++;
+			}
+		}
+		*/
+
+		
+		// acceleration accumulator for the urges
+		glm::vec3 acc_bo(0.0f, 0.0f, 0.0f);
+
 		for (int32_t x_idx = -x_fact; x_idx <= x_fact; x_idx += x_fact)
 		{
 			// iterate over the y coordinate
@@ -448,57 +533,27 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 					{
 						Boid *other = &((*boids_end)[uniform_grid[key*num_per_cell + j]]);
 						// check the distance, if it is within the max distance then apply forces
+						if(other == boid){continue;}
 						glm::vec3 disp = other->p - boid->p;
 						float dist_sqr = disp.x * disp.x + disp.y * disp.y + disp.z * disp.z;
 						if (dist_sqr < (max_r * max_r))
 						{
-							// acceleration accumulator
-							glm::vec3 da(0.0f, 0.0f, 0.0f);
-
-							// cosine view angle
-							float v_m = glm::length(boid->v);
-							float dist = glm::sqrt(dist_sqr);
-							float view_angle = glm::dot(boid->v, disp) / (v_m * dist);
-
-							// fist apply alignment forces
-							if (dist_sqr < (r_align * r_align) && (view_angle > angle_align))
-							{
-								da += k_align * (other->v - boid->v);
-							}
-
-							// then the cohesion forces
-							if (dist_sqr > (r_sep * r_sep) && dist_sqr < (r_coh * r_coh) && (view_angle > angle_coh))
-							{
-								da += k_coh * disp;
-							}
-							// otherwise the separation forces
-							else if (view_angle > angle_sep)
-							{
-								float acc_m = k_sep / (dist_sqr);
-								if (acc_m * dist > (max_acc))
-								{
-									acc_m = max_acc;
-								}
-
-								da += -disp * acc_m;
-							}
-
-							acc_urg += da;
-
-							// increment the number of neighbors
+							acc_bo += HandleBoid(boid, other, dist_sqr);
 							num_neighbors++;
 						}
+						
 					}
 					//printf("tr: %lu, checkpoint 12\n", thread_id);
 					//std::cout << std::flush;
 				}
 			}
 		}
+		
+		glm::vec3 acc = acc_obs;
 
 		if(num_neighbors > 0)
 		{
-			// calculate the acceleration from the urges
-			acc += acc_urg * (1.0f / float(num_neighbors));
+			acc += (1.0f / float(num_neighbors)) * acc_bo;
 		}
 		
 		//printf("tr: %lu, checkpoint 12.1\n", thread_id);
@@ -702,30 +757,37 @@ glm::vec3 BoidSimulation::HandleBoid(const Boid *boid, const Boid *other, float 
 	float dist = glm::sqrt(dist_sqr);
 	float view_angle = glm::dot(boid->v, disp) / (v_m * dist);
 
-	// fist apply alignment forces
-	if(dist_sqr < (r_align * r_align) && (view_angle > angle_align))
+	// out of range, ignor this
+	if(dist > r_coh)
 	{
-		acc += k_align*(other->v - boid->v);
+		return glm::vec3(0.0f, 0.0f, 0.0f);
 	}
-	
-	// then the cohesion forces
-	if( dist_sqr > (r_sep * r_sep) && dist_sqr < (r_coh*r_coh) && (view_angle > angle_coh))
+	// case for cohesion
+	else if((dist > r_align) && (view_angle > angle_coh))
 	{
-		acc += k_coh * disp;
+		acc = k_coh * disp;
+		return acc;
 	}
-	// otherwise the separation forces
-	else if (view_angle > angle_sep)
+	// case for alignment
+	else if((dist > r_sep) && (view_angle > angle_align))
+	{
+		acc = k_align*(other->v - boid->v);
+		return acc;
+	}
+	// case for separation
+	else if(view_angle > angle_sep)
 	{
 		float acc_m = k_sep / (dist_sqr);
-		if (acc_m * dist > (max_acc))
+		if(std::isnan(acc_m) || std::isinf(acc_m))
 		{
-			acc_m = max_acc;
+			return glm::vec3(max_acc, 0.0f, 0.0f);
 		}
 
-		acc += -disp * acc_m;
+		acc = (-1.0f) * disp * acc_m;
+		return acc;
 	}
 
-	return acc;
+	return glm::vec3(0.0f, 0.0f, 0.0f);
 }
 
 float BoidSimulation::GetDeltatime()
@@ -736,22 +798,28 @@ float BoidSimulation::GetDeltatime()
 void BoidSimulation::render(const ModelViewContext &view)
 {
 	// render spheres
-	for(size_t i = 0; i < NUM_SPHERES; i++)
+	for(size_t i = 0; i < num_spheres; i++)
 	{
 		givr::addInstance(sphere_render, glm::scale( glm::translate(glm::mat4(1.0f), spheres[i].point), glm::vec3(spheres[i].radius, spheres[i].radius, spheres[i].radius)));
 	}
 
+	// we are going to be reading from the arrays so do not let them get swaped
+	array_mutex.lock();
+	// the interpolation factor
+	float interp = (elapsed_time.load() / delta_time.load());
+
+	//printf("delta_time: %5.3f, elapsed_time: %5.3f, interp %6.4f\n",delta_time.load(), elapsed_time.load(), interp);
 	// dispatch render threads
 	for(size_t i = 0; i < RENDER_THREADS; i++)
 	{
-		threads_rnd[i] = std::thread(&BoidSimulation::AddBoidRenderable, this, i);
+		threads_rnd[i] = std::thread(&BoidSimulation::AddBoidRenderable, this, i, interp);
 	}
 
 	for(size_t i = 0; i < RENDER_THREADS; i++)
 	{
 		threads_rnd[i].join();
 	}
-
+	array_mutex.unlock();
 	// draw
 	givr::style::draw(wall_render, view);
 	givr::style::draw(sphere_render, view);
@@ -761,9 +829,14 @@ void BoidSimulation::render(const ModelViewContext &view)
 	{
 		givr::style::draw(boid_render[i], view);
 	}
+
+	std::chrono::steady_clock::time_point end_t = std::chrono::steady_clock::now();
+	render_delta = (std::chrono::duration<float, std::ratio<1>>(end_t - last_render_time)).count();
+	last_render_time = end_t;
+	elapsed_time.store(render_delta + elapsed_time.load());
 }
 
-void BoidSimulation::AddBoidRenderable(size_t thread_id)
+void BoidSimulation::AddBoidRenderable(size_t thread_id, float interp)
 {
 	size_t start = rendering_tasks[thread_id].start_index;
 	size_t end = rendering_tasks[thread_id].end_index;
@@ -775,7 +848,23 @@ void BoidSimulation::AddBoidRenderable(size_t thread_id)
 	// render the boids in between the given indices
 	for(size_t i = start; i < end; i++)
 	{
-		givr::addInstance(boid_render[thread_id], glm::translate(glm::mat4(1.0f), (*boids_start)[i].p));
+		// interpolate between these two
+		glm::vec3 p_start = (*boids_start)[i].p;
+		glm::vec3 v_start = (*boids_start)[i].v;
+
+		glm::vec3 p_end = (*boids_end)[i].p;
+		glm::vec3 v_end = (*boids_end)[i].v;
+
+		// calculate the acceleration
+		glm::vec3 a_avg = (v_end - v_start) * ((1.0f)/ delta_time);
+
+		// add gravity to the acceleration (if you are not moving in a gravitational feild, then you must be accelerating against it)
+		a_avg.y += 9.81f;
+
+		// calculate the new position
+		p_start = (p_end - p_start)*interp + p_start;
+		v_start = (v_end - v_start)*interp + v_start;
+		givr::addInstance(boid_render[thread_id], glm::translate(glm::mat4(1.0f), p_start));
 	}
 }
 
@@ -814,10 +903,10 @@ void BoidSimulation::SetupBoids()
 	// get the largest detection radius
 	max_r = std::max(std::max(r_sep, r_align), r_coh);
 	max_r_inv = 1.0f / max_r;
-	// calculate the number of bins in the x,y,z direction (+1 incase the bounds not evenlly divisible by the radius)
-	bins_x = 2 * (size_t(bound_x / max_r) + 1);
-	bins_y = 2 * (size_t(bound_y / max_r) + 1);
-	bins_z = 2 * (size_t(bound_z / max_r) + 1);
+	// calculate the number of bins in the x,y,z direction (+2 to ensure overlap)
+	bins_x = 2 * (size_t(bound_x / max_r) + 2);
+	bins_y = 2 * (size_t(bound_y / max_r) + 2);
+	bins_z = 2 * (size_t(bound_z / max_r) + 2);
 
 	// calculate the location of the all negative corner of the uniform grid (this will be used as the origin)
 	origin_x = -float((bins_x >> 1)) * max_r;
@@ -825,7 +914,7 @@ void BoidSimulation::SetupBoids()
 	origin_z = -float((bins_z >> 1)) * max_r;
 
 	// approximate the number per bin as the average number of boids per cell in the simulation multiplied by 2 plus 10 (x*2 ensures ratio of at least 2, +10 accounts for sparse grid scenario where num_boids/bins is near zero) 
-	num_per_cell = ((num_boids / (bins_x * bins_y * bins_z)) + 1)*2 + 1 + 10;
+	num_per_cell = ((num_boids / (bins_x * bins_y * bins_z)) + 1)*10 + 1 + 10;
 
 	// the jumps (values needed to jump the grid by one bin)
 	x_jump = bins_y * bins_z * num_per_cell;
@@ -841,6 +930,8 @@ void BoidSimulation::SetupBoids()
 	ugrid_len = num_cells*num_per_cell;
 	// initialize the uniform grid
 	uniform_grid.resize(ugrid_len);
+
+	hash_grid.resize(num_cells);
 
 	// setup the boid rendering tasks
 	// first get the number of boids per task
@@ -988,6 +1079,8 @@ void BoidSimulation::SetupWalls()
 	glm::vec3 p7(-bound_x, bound_y, bound_z);
 	glm::vec3 p8(-bound_x, bound_y, -bound_z);
 
+	wall_geometry = givr::geometry::MultiLine();
+
 	wall_geometry.push_back(givr::geometry::Line(givr::geometry::Point1(p1), givr::geometry::Point2(p2)));
 	wall_geometry.push_back(givr::geometry::Line(givr::geometry::Point1(p2), givr::geometry::Point2(p3)));
 	wall_geometry.push_back(givr::geometry::Line(givr::geometry::Point1(p3), givr::geometry::Point2(p4)));
@@ -1008,64 +1101,68 @@ void BoidSimulation::SetupWalls()
 
 void BoidSimulation::SetupSpheres()
 {
+	if(num_spheres < 14)
+	{
+		num_spheres = 14;
+	}
 	// resize spheres vector
-	spheres.resize(NUM_SPHERES);
+	spheres.resize(num_spheres);
 
 	// place 8 at the corners of the volume
 	int max = RAND_MAX;
 
-	float r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+	float r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 	glm::vec3 p(bound_x, bound_y, bound_z);
 	spheres[0].radius = r;
 	spheres[0].point = p;
 	spheres[0].type = ColliderType::C_Sphere;
 
-	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+	r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 	p = glm::vec3(bound_x, bound_y, -bound_z);
 	spheres[1].radius = r;
 	spheres[1].point = p;
 	spheres[1].type = ColliderType::C_Sphere;
 
-	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+	r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 	p = glm::vec3(bound_x, -bound_y, bound_z);
 	spheres[2].radius = r;
 	spheres[2].point = p;
 	spheres[2].type = ColliderType::C_Sphere;
 
-	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+	r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 	p = glm::vec3(bound_x, -bound_y, -bound_z);
 	spheres[3].radius = r;
 	spheres[3].point = p;
 	spheres[3].type = ColliderType::C_Sphere;
 
-	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+	r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 	p = glm::vec3(-bound_x, bound_y, bound_z);
 	spheres[4].radius = r;
 	spheres[4].point = p;
 	spheres[4].type = ColliderType::C_Sphere;
 
-	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+	r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 	p = glm::vec3(-bound_x, bound_y, -bound_z);
 	spheres[5].radius = r;
 	spheres[5].point = p;
 	spheres[5].type = ColliderType::C_Sphere;
 
-	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+	r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 	p = glm::vec3(-bound_x, -bound_y, bound_z);
 	spheres[6].radius = r;
 	spheres[6].point = p;
 	spheres[6].type = ColliderType::C_Sphere;
 
-	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+	r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 	p = glm::vec3(-bound_x, -bound_y, -bound_z);
 	spheres[7].radius = r;
 	spheres[7].point = p;
 	spheres[7].type = ColliderType::C_Sphere;
 
 	// the remaining spheres can be at random positions
-	for(size_t i = 8; i < NUM_SPHERES; i++)
+	for(size_t i = 8; i < num_spheres; i++)
 	{
-		r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
+		r = ((float(std::rand() % max) / float(max))) * (sphere_max_r - sphere_min_r) + sphere_min_r;
 
 		// generate random position for each sphere
 		float x = ((float(std::rand() % max) / float(max)) * 2.0f - 1.0f) * bound_x;
@@ -1194,10 +1291,13 @@ void BoidSimulation::ResetBoidPositions()
 void BoidSimulation::SortIntoGrid()
 {
 	// set all grid fill values to zero
-	for(size_t i = 0; i < (bins_x*x_fact); i++)
+	for(size_t i = 0; i < (num_cells); i++)
 	{
 		size_t cell = i * num_per_cell;
 		uniform_grid[cell] = 0;
+
+		hash_grid[i].clear();
+		hash_grid[i].reserve(num_per_cell);
 	}
 
 	// for each boid, place it into an appropriate cell on the uniform grid
@@ -1213,6 +1313,19 @@ void BoidSimulation::SortIntoGrid()
 		size_t cell = index_x * x_fact + index_y * y_fact + index_z;
 		boid->cell_index = cell;
 
+		// insert into the hash grid
+		for (int x = -1; x <= 1; x++)
+		{
+			for (int y = -1; y <= 1; y++)
+			{
+				for (int z = -1; z <= 1; z++)
+				{
+					int32_t key = cell + x * x_fact + y * y_fact + z;
+					hash_grid[key].push_back(i);
+				}
+			}
+		}
+
 		// the fill is located at the first index in the cell
 		uint32_t fill = uniform_grid[cell*num_per_cell];
 
@@ -1227,8 +1340,48 @@ void BoidSimulation::SortIntoGrid()
 		uniform_grid[cell*num_per_cell + fill + 1] = i;
 		// increment the number of elements in the cell
 		uniform_grid[cell*num_per_cell] = fill +1;
+
+
 	}
 
+
+	/*
+	// print the hash grid
+	for(size_t i = 0; i < num_cells; i++)
+	{
+		size_t size = hash_grid[i].size();
+		size_t index_x = i / x_fact;
+		size_t index_y = (i % x_fact) / y_fact;
+		size_t index_z = (i % x_fact) % y_fact;
+
+		float x = float(index_x) * max_r + origin_x;
+		float y = float(index_y) * max_r + origin_y;
+		float z = float(index_z) * max_r + origin_z;
+
+		printf("\nCell: %lu has size: %lu, %4.1f, %4.1f, %4.1f\n", i, size, x, y, z);
+		// the neighbors should be:
+		for(int x_i = -1; x_i <= 1; x_i++)
+		{
+			
+			for(int y_i = -1; y_i <= 1; y_i++)
+			{
+				printf("\nCells: ");
+				for(int z_i = -1; z_i <= 1; z_i++)
+				{
+					printf("%lu, ", (i + x_i*x_fact + y_i*y_fact +z_i));
+				}
+			}
+			printf("\n");
+		}
+		
+		for(size_t j = 0; j < size; j++)
+		{
+			Boid *boid = &(*to_positions)[hash_grid[i][j]];
+
+			printf("\t point: %4.1f, %4.1f, %4.1f, cell: %lu\n", boid->p.x, boid->p.y, boid->p.z, boid->cell_index);
+		}
+	}
+	*/
 	/*
 	// print the results
 	for(size_t i = 0; i < bins_x*x_fact; i++)
