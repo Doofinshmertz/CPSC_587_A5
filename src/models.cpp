@@ -2,7 +2,7 @@
 #include <random>
 #include <stdio.h>
 #include <chrono>
-
+#include <cmath>
 // constructor
 BoidSimulation::BoidSimulation()
 	: boid_geometry(givr::geometry::Mesh(givr::geometry::Filename("./models/dart.obj"))),
@@ -40,20 +40,7 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 							 float _max_speed, float _max_acceleration,
 							 size_t _num_boids)
 {
-	// set all values
-	angle_sep = _angle_sep;
-	angle_align = _angle_align;
-	angle_coh = _angle_coh;
-	r_sep = _r_sep;
-	r_align = _r_align;
-	r_coh = _r_coh;
-	k_sep = _k_sep;
-	k_align = _k_align;
-	k_coh = _k_coh;
-	offset = _offset;
-	k_repulsion = _k_repulsion;
-	max_speed = _max_speed;
-	max_acc = _max_acceleration;
+
 
 
 	// need to re-calculate grid spacing
@@ -67,6 +54,21 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 		stop_simulation = true;
 
 		main_loop_thread.join();
+
+		// set all values
+		angle_sep = std::cos(glm::radians(_angle_sep));
+		angle_align = std::cos(glm::radians(_angle_align));
+		angle_coh = std::cos(glm::radians(_angle_coh));
+		r_sep = _r_sep;
+		r_align = _r_align;
+		r_coh = _r_coh;
+		k_sep = _k_sep;
+		k_align = _k_align;
+		k_coh = _k_coh;
+		offset = _offset;
+		k_repulsion = _k_repulsion;
+		max_speed = _max_speed;
+		max_acc = _max_acceleration;
 		num_boids = _num_boids; // this was one hell of a race condition to find
 
 		printf("main loop should have stopped\n");
@@ -78,7 +80,22 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 	}
 	else
 	{
-		num_boids = _num_boids;
+		// set all values
+		angle_sep = glm::radians(_angle_sep);
+		angle_align = glm::radians(_angle_align);
+		angle_coh = glm::radians(_angle_coh);
+		r_sep = _r_sep;
+		r_align = _r_align;
+		r_coh = _r_coh;
+		k_sep = _k_sep;
+		k_align = _k_align;
+		k_coh = _k_coh;
+		offset = _offset;
+		k_repulsion = _k_repulsion;
+		max_speed = _max_speed;
+		max_acc = _max_acceleration;
+		num_boids = _num_boids; // this was one hell of a race condition to find
+
 		printf("starting simulation\n");
 		// reset the boid positions
 		SetupSimulation();
@@ -137,6 +154,7 @@ void BoidSimulation::SimulationLoop()
 			continue;
 		}
 
+		
 		// acceleration step
 		// dispatch threads
 		float del = delta_time;
@@ -144,6 +162,7 @@ void BoidSimulation::SimulationLoop()
 		{
 			threads_sim[i] = std::thread(&BoidSimulation::SimulateBoids, this, i, del);
 		}
+		
 		// join threads
 		for (size_t i = 0; i < SIMULATION_THREADS; i++)
 		{
@@ -154,7 +173,7 @@ void BoidSimulation::SimulationLoop()
 		
 		// update the grid
 		UpdateGrid();
-		
+
 		// swap buffers
 		std::vector<Boid>* temp = start_positions.load();
 		start_positions = end_positions.load();
@@ -173,40 +192,28 @@ void BoidSimulation::SimulationLoop()
 
 void BoidSimulation::UpdateGrid()
 {
-	std::vector<Boid>* boids = to_positions;
-	// set all grid fill values to zero
-	for (size_t i = 0; i < (num_cells); i++)
+	// set the fill values to zero
+	for(size_t i = 0; i < num_cells; i++)
 	{
-		size_t cell = i * num_per_bin;
-		uniform_grid[cell] = 0;
+		uniform_grid[i*num_per_cell] = 0;
 	}
 
-	// for each boid, place it into an appropriate cell on the uniform grid
-	for (size_t i = 0; i < num_boids; i++)
+
+	// iterate over the boids and place them in appropriate cells
+	for(size_t i = 0; i < num_boids; i++)
 	{
-		Boid *boid = &(*boids)[i];
-		size_t cell = boid->cell_index;
+		// the get cell value of the current boid
+		size_t cell_index = (*to_positions)[i].cell_index % num_cells;
+		uint32_t fill = uniform_grid[cell_index*num_per_cell];
 
-		// place this value in the uniform grid
-		// calculate the position of the first index in the cell
-		cell = (cell * num_per_bin) % num_bins;
-		// the fill is located at the first index in the cell
-		uint32_t fill = ++uniform_grid[cell];
-
-		// if the offset is greater that or equal the available positions in the cell
-		// then travers in the z direction until we find a cell with vacancy
-		if (fill >= num_per_bin)
+		while((fill+1) >= num_per_cell)
 		{
-			while (fill >= num_per_bin)
-			{
-				uniform_grid[cell]--;
-				cell = (cell + num_per_bin) % num_bins;
-				fill = ++uniform_grid[cell];
-			}
+			cell_index = (cell_index + 1) % num_cells;
+			fill = uniform_grid[cell_index*num_per_cell];
 		}
 
-		// place the index of this boid into this cell
-		uniform_grid[cell + fill] = i;
+		uniform_grid[cell_index*num_per_cell + fill + 1] = i;
+		uniform_grid[cell_index*num_per_cell] = fill+1;
 	}
 }
 
@@ -218,11 +225,19 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 	std::vector<Boid> *boids_to = to_positions.load();
 	std::vector<Boid> *boids_end = end_positions.load();
 
+	// detection distance for objects
+	float object_detect_r = max_r + offset;
+
+	// detection distance for boids
+	float boid_detect_r = max_r * max_r;
+
 	for(size_t i = start; i < end; i++)
 	{
 
+		//printf("tr: %lu, checkpoint 1\n", thread_id);
+
 		// get the current boid
-		Boid *boid = &(*boids_end)[i];
+		Boid *boid = &(*end_positions)[i];
 		int64_t cell = boid->cell_index;
 
 		// the acceleration accumulator
@@ -230,9 +245,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		
 		// check the cell along with the surrounding cells
 		// iterate over the x coordinate
-
-		// if we detect an object, avoid it before considering the 3 urges
-		bool avoiding_object = false;
+		//printf("tr: %lu, checkpoint 2\n", thread_id);
 		for(int32_t x_idx = -x_fact; x_idx <= x_fact; x_idx += x_fact)
 		{
 			// iterate over the y coordinate
@@ -243,70 +256,261 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 				for(int32_t z_idx = -1; z_idx <= 1; z_idx++)
 				{
 					// the cell key
-					size_t key = cell + x_idx + y_idx +z_idx;
-
+					size_t key = (cell + x_idx + y_idx +z_idx)%num_cells;
+					//printf("tr: %lu, checkpoint 3\n", thread_id);
+					//std::cout << std::flush;
 					// check for colliders first
 					if(collider_map.contains(key))
 					{
-						avoiding_object = true;
+						//printf("tr: %lu, checkpoint 4\n", thread_id);
+						//std::cout << std::flush;
 						std::vector<Collider*>* colliders = &collider_map[key];
 
-						for(uint32_t i = 0; i < colliders->size(); i++)
+						for(uint32_t j = 0; j < colliders->size(); j++)
 						{
-							Collider* ptr = (*colliders)[i];
+							//printf("tr: %lu, checkpoint 5\n", thread_id);
+							//std::cout << std::flush;
+							Collider* ptr = (*colliders)[j];
 							// iterate over potential colliders at this position
 							if (ptr->type == ColliderType::C_Plane)
 							{
-								Plane *c = static_cast<Plane *>(ptr);
-								HandlePlane(boid, c, &acc);
+								Plane *plane = static_cast<Plane *>(ptr);
+								//printf("tr: %lu, checkpoint 6\n", thread_id);
+								//std::cout << std::flush;
+								// check the distance
+								float dist_sqr = glm::dot((boid->p - plane->point), plane->normal);
+								//printf("tr: %lu, checkpoint 6.1\n", thread_id);
+								//std::cout << std::flush;
+
+								dist_sqr = dist_sqr* dist_sqr;
+
+								//printf("tr: %lu, checkpoint 6.2\n", thread_id);
+								//std::cout << std::flush;
+								if(dist_sqr < (object_detect_r*object_detect_r))
+								{
+
+									// is the boid within the offset distance of the wall, if so use repulsion
+									if (dist_sqr < (offset * offset))
+									{
+										// if within offset distance, apply max acceleration to prevent collision
+										acc += plane->normal * max_acc;
+									}
+									else
+									{
+										// otherwise use turning
+
+										// first calculate the acceleration normal
+										// the velocity maginutude
+										float v_m = glm::length(boid->v);
+										// the velocity normal
+										glm::vec3 v_n = boid->v / v_m;
+
+										// the normal of the plane
+										glm::vec3 n = plane->normal;
+
+										// the acceleration normal
+										glm::vec3 a = n - glm::dot(v_n, n) * v_n;
+										float mag = a.x * a.x + a.y * a.y + a.z * a.z;
+										// if velocity is pointing directly at the normal, choose a different vector to get it out of this scenario
+										if (mag < 0.0001f)
+										{
+											a = glm::vec3(n.y, n.z, n.x);
+											mag = a.x * a.x + a.y * a.y + a.z * a.z;
+										}
+
+										mag = glm::sqrt(mag);
+										a = a / mag;
+
+										// now calculate the radius
+										// the displacement vector
+										glm::vec3 disp = boid->p - plane->point;
+
+										float r = (glm::dot(disp, n) - offset) / (1.0f - glm::dot(a, n));
+
+										float a_m = v_m * v_m / r;
+										if (std::isnan(a_m) || std::isinf(a_m) || a_m > max_acc)
+										{
+											a_m = max_acc;
+										}
+										acc += a * a_m;
+									}
+								}
+								//printf("tr: %lu, checkpoint 7\n", thread_id);
 							}
 							else
 							{
-								Sphere *c = static_cast<Sphere *>(ptr);
-								HandleSphere(boid,c, &acc);
+								Sphere *sphere = static_cast<Sphere *>(ptr);
+								//printf("tr: %lu, checkpoint 8\n", thread_id);
+
+								// check the distance
+								glm::vec3 pc = boid->p - sphere->point;
+
+								float dist_sqr = pc.x*pc.x+pc.y*pc.y + pc.z*pc.z;
+								// the detection radius of the boid + the offset + the radius of the sphere
+								float detect_dist = object_detect_r + sphere->radius;
+								
+								if(dist_sqr < detect_dist*detect_dist)
+								{
+									// is the boid within the offset distance of the sphere, if so use repulsion
+									float repulsion_dist = sphere->radius + offset;
+									float dist = glm::sqrt(dist_sqr);
+									if (dist < repulsion_dist)
+									{
+										// use repulsion
+										glm::vec3 normal = boid->p - sphere->point;
+										normal = normal / dist;
+										// if within offset distance, apply max acceleration to prevent collision
+										acc += normal * max_acc;
+									}
+									else
+									{
+										// use streering
+										// first calculate the acceleration normal
+										// get the velocity
+										glm::vec3 v_n = boid->v;
+										float v_m = glm::length(v_n);
+										v_n = v_n / v_m;
+
+										// the displacement vector
+										glm::vec3 pc = boid->p - sphere->point;
+										glm::vec3 pc_n = glm::normalize(pc);
+
+										// the acceleration normal
+										glm::vec3 a_n = v_n - glm::dot(v_n, pc_n) * pc_n;
+										float mag = a_n.x * a_n.x + a_n.y * a_n.y + a_n.z * a_n.z;
+										// if velocity is pointing directly at the normal, choose a different vector to get it out of this scenario
+										if (mag < 0.0001f)
+										{
+											a_n = glm::vec3(pc_n.y, pc_n.z, pc_n.x);
+											mag = a_n.x * a_n.x + a_n.y * a_n.y + a_n.z * a_n.z;
+										}
+
+										mag = glm::sqrt(mag);
+										a_n = a_n / mag;
+
+										// now calculate the radius
+										float surface = sphere->radius + offset;
+										float r = ((pc.x * pc.x + pc.y * pc.y + pc.z * pc.z) - surface * surface) / (2.0f * (surface - glm::dot(a_n, pc)));
+
+										float a_m = v_m * v_m / r;
+										if (std::isnan(a_m) || std::isinf(a_m) || a_m > max_acc)
+										{
+											a_m = max_acc;
+										}
+										acc += a_m * a_n;
+									}
+								}
+								//printf("tr: %lu, checkpoint 9\n", thread_id);
+								//std::cout << std::flush;
 							}
 						}
 					}
+
+					//printf("tr: %lu, checkpoint 9.1\n", thread_id);
+					//std::cout << std::flush;
 				}
 			}
 		}
+		//printf("tr: %lu, checkpoint 9.2\n", thread_id);
+		//std::cout << std::flush;
 
+		// count the number of neighbors
+		int32_t num_neighbors = 0;
+		// acceleration accumulator for the urges
+		glm::vec3 acc_urg(0.f, 0.f,0.f);
 		// if we are not avoiding an object, then calculate the 3 urges
-		if(!avoiding_object)
+
+		//printf("tr: %lu, checkpoint 10\n", thread_id);
+		//std::cout << std::flush;
+		for (int32_t x_idx = -x_fact; x_idx <= x_fact; x_idx += x_fact)
 		{
-			for (int32_t x_idx = -x_fact; x_idx <= x_fact; x_idx += x_fact)
+			// iterate over the y coordinate
+			for (int32_t y_idx = -y_fact; y_idx <= y_fact; y_idx += y_fact)
 			{
-				// iterate over the y coordinate
-				for (int32_t y_idx = -y_fact; y_idx <= y_fact; y_idx += y_fact)
+
+				// iterate over the z coordinate
+				for (int32_t z_idx = -1; z_idx <= 1; z_idx++)
 				{
-
-					// iterate over the z coordinate
-					for (int32_t z_idx = -1; z_idx <= 1; z_idx++)
+					// if the number of neighbors exceeds a certian number the stop
+					if (num_neighbors >= MAX_NEIGHBORS)
 					{
-						// the cell key
-						size_t key = ((cell + x_idx + y_idx + z_idx) % num_cells)*num_per_bin;			
+						break;
+					}
+					//printf("tr: %lu, checkpoint 11\n", thread_id);
+					//std::cout << std::flush;
+					// the cell key
+					size_t key = (cell + x_idx + y_idx + z_idx) % num_cells;
 
-						// for each boid in this cell calculate its effect on the current boid
-						size_t fill = uniform_grid[key];
+					// for each boid in this cell calculate its effect on the current boid
+					size_t fill = uniform_grid[key*num_per_cell];
 
-						for (size_t j = key + 1; j <= key + fill; j++)
+					for (size_t j = 1; j <= fill; j++)
+					{
+						Boid *other = &((*boids_end)[uniform_grid[key*num_per_cell + j]]);
+						// check the distance, if it is within the max distance then apply forces
+						glm::vec3 disp = other->p - boid->p;
+						float dist_sqr = disp.x * disp.x + disp.y * disp.y + disp.z * disp.z;
+						if (dist_sqr < (max_r * max_r))
 						{
-							Boid *other = &((*boids_end)[uniform_grid[j]]);
-							HandleBoid(boid, other, &acc);
+							// acceleration accumulator
+							glm::vec3 da(0.0f, 0.0f, 0.0f);
+
+							// cosine view angle
+							float v_m = glm::length(boid->v);
+							float dist = glm::sqrt(dist_sqr);
+							float view_angle = glm::dot(boid->v, disp) / (v_m * dist);
+
+							// fist apply alignment forces
+							if (dist_sqr < (r_align * r_align) && (view_angle > angle_align))
+							{
+								da += k_align * (other->v - boid->v);
+							}
+
+							// then the cohesion forces
+							if (dist_sqr > (r_sep * r_sep) && dist_sqr < (r_coh * r_coh) && (view_angle > angle_coh))
+							{
+								da += k_coh * disp;
+							}
+							// otherwise the separation forces
+							else if (view_angle > angle_sep)
+							{
+								float acc_m = k_sep / (dist_sqr);
+								if (acc_m * dist > (max_acc))
+								{
+									acc_m = max_acc;
+								}
+
+								da += -disp * acc_m;
+							}
+
+							acc_urg += da;
+
+							// increment the number of neighbors
+							num_neighbors++;
 						}
 					}
+					//printf("tr: %lu, checkpoint 12\n", thread_id);
+					//std::cout << std::flush;
 				}
 			}
 		}
 
+		if(num_neighbors > 0)
+		{
+			// calculate the acceleration from the urges
+			acc += acc_urg * (1.0f / float(num_neighbors));
+		}
+		
+		//printf("tr: %lu, checkpoint 12.1\n", thread_id);
+		//std::cout << std::flush;
 		// bound the acceleration to a maximum value
 		float acc_m = acc.x * acc.x + acc.y * acc.y + acc.z * acc.z;
 		if (acc_m > (max_acc * max_acc))
 		{
 			acc = acc * max_acc / glm::sqrt(acc_m);
 		}
-
-
+		//printf("tr: %lu, checkpoint 13\n", thread_id);
+		//std::cout << std::flush;
 
 		// calculate the new velocity
 		glm::vec3 v = boid->v + acc*dt;
@@ -317,7 +521,9 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		{
 			v = v * max_speed / glm::sqrt(v_m);
 		}
-		
+		//printf("tr: %lu, checkpoint 14\n", thread_id);
+		//std::cout << std::flush;
+
 		// calculate the new position
 		glm::vec3 p = boid->p + v*dt;
 
@@ -325,81 +531,201 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		if(p.x > bound_x)
 		{
 			p.x = bound_x - offset;
+			//printf("x_positive bound hit\n");
 		}
 		if(p.x < -bound_x)
 		{
 			p.x = offset - bound_x;
+			//printf("x negative bound hit\n");
 		}
+		//printf("tr: %lu, checkpoint 15\n", thread_id);
 
 		if (p.y > bound_y)
 		{
 			p.y = bound_y - offset;
+			//printf("y positive bound hit\n");
 		}
 		if (p.y < -bound_y)
 		{
 			p.y = offset - bound_y;
+			//printf("y negative bound hit\n");
 		}
+		//printf("tr: %lu, checkpoint 16\n", thread_id);
 
 		if (p.z > bound_z)
 		{
 			p.z = bound_z - offset;
+			//printf("z positive bound hit\n");
 		}
 		if (p.z < -bound_z)
 		{
 			p.z = offset - bound_z;
+			//printf("z negative bound hit\n");
 		}
+		//printf("tr: %lu, checkpoint 16.1\n", thread_id);
+		//std::cout << std::flush;
 		// get the new boid
 		Boid *boid_to = &(*boids_to)[i];
+		//printf("tr: %lu, checkpoint 17\n", thread_id);
+		//std::cout << std::flush;
 
 		boid_to->v = v;
 		boid_to->p = p;
+		//printf("tr: %lu, checkpoint 18\n", thread_id);
+		//std::cout << std::flush;
+
 		// calculate the new cell
 		// convert the position to the cell grid position
 		size_t index_x = (p.x - origin_x) * max_r_inv;
 		size_t index_y = (p.y - origin_y) * max_r_inv;
 		size_t index_z = (p.z - origin_z) * max_r_inv;
+		//printf("tr: %lu, checkpoint 18\n", thread_id);
 
 		boid_to->cell_index = index_x * x_fact + index_y * y_fact + index_z;
+		//printf("tr: %lu, checkpoint 19\n", thread_id);
+		//std::cout << std::flush;
 	}
 }
 
 
-void BoidSimulation::HandlePlane(Boid *boid, Plane *plane, glm::vec3* acc)
+glm::vec3 BoidSimulation::HandlePlane(const Boid *boid, const Plane *plane, float dist_sqr)
 {
+
+	// is the boid within the offset distance of the wall, if so use repulsion
+	if(dist_sqr < (offset*offset))
+	{
+		// if within offset distance, apply max acceleration to prevent collision	
+		return plane->normal * max_acc;
+	}
 
 	
-	glm::vec3 p(1.0f, 1.0f, 1.0f);
-	glm::vec3 p2(1.0f, 1.0f, 1.0f);
-	glm::vec3 p3(1.0f, 1.0f, 1.0f);
+	// otherwise use turning
 
-	p = p / glm::length(p2);
-	p2 = glm::dot(p, p3) * p2;
+	// first calculate the acceleration normal
+	// the velocity maginutude
+	float v_m = glm::length(boid->v);
+	// the velocity normal
+	glm::vec3 v_n = boid->v / v_m;
 
-	*acc += p2;
+	// the normal of the plane
+	glm::vec3 n = plane->normal;
+
+	// the acceleration normal
+	glm::vec3 a = n - glm::dot(v_n, n) * v_n;
+	float mag = a.x * a.x + a.y*a.y + a.z*a.z;
+	// if velocity is pointing directly at the normal, choose a different vector to get it out of this scenario
+	if(mag < 0.0001f)
+	{
+		a = glm::vec3(n.y, n.z, n.x);
+		mag = a.x * a.x + a.y * a.y + a.z * a.z;
+	}
+
+	mag = glm::sqrt(mag);
+	a = a/mag;
+
+	// now calculate the radius
+	// the displacement vector
+	glm::vec3 disp = boid->p - plane->point;
+	
+	float r = (glm::dot(disp, n) - offset) / (1.0f - glm::dot(a, n));
+
+	float a_m = v_m*v_m / r;
+	if(std::isnan(a_m) || std::isinf(a_m) || a_m > max_acc)
+	{
+		a_m = max_acc;
+	}
+	return a * a_m;
 }
 
-void BoidSimulation::HandleSphere(Boid *boid, Sphere *sphere, glm::vec3 *acc)
+glm::vec3 BoidSimulation::HandleSphere(const Boid *boid, const Sphere *sphere, float dist_sqr)
 {
-	glm::vec3 p(1.0f, 1.0f, 1.0f);
-	glm::vec3 p2(1.0f, 1.0f, 1.0f);
-	glm::vec3 p3(1.0f, 1.0f, 1.0f);
+	// is the boid within the offset distance of the sphere, if so use repulsion
+	float repulsion_dist = sphere->radius + offset;
+	float dist = glm::sqrt(dist_sqr);
+	if (dist < repulsion_dist)
+	{
+		// use repulsion
+		glm::vec3 normal = boid->p - sphere->point;
+		normal = normal / dist;
+		// if within offset distance, apply max acceleration to prevent collision
+		return normal * max_acc;
+	}
+	else
+	{
+		// use streering
+		// first calculate the acceleration normal
+		// get the velocity
+		glm::vec3 v_n = boid->v;
+		float v_m = glm::length(v_n);
+		v_n = v_n / v_m;
 
-	p = p / glm::length(p2);
-	p2 = glm::dot(p, p3) * p2;
+		// the displacement vector
+		glm::vec3 pc = boid->p - sphere->point;
+		glm::vec3 pc_n = glm::normalize(pc);
 
-	*acc += p2;
+		// the acceleration normal
+		glm::vec3 a_n = v_n - glm::dot(v_n, pc_n) * pc_n;
+		float mag = a_n.x * a_n.x + a_n.y * a_n.y + a_n.z * a_n.z;
+		// if velocity is pointing directly at the normal, choose a different vector to get it out of this scenario
+		if (mag < 0.0001f)
+		{
+			a_n = glm::vec3(pc_n.y, pc_n.z, pc_n.x);
+			mag = a_n.x * a_n.x + a_n.y * a_n.y + a_n.z * a_n.z;
+		}
+
+		mag = glm::sqrt(mag);
+		a_n = a_n / mag;
+
+		// now calculate the radius
+		float surface = sphere->radius + offset;
+		float r = ((pc.x * pc.x + pc.y * pc.y + pc.z * pc.z) - surface * surface) / (2.0f * (surface - glm::dot(a_n, pc)));
+
+		float a_m = v_m * v_m / r;
+		if (std::isnan(a_m) || std::isinf(a_m) || a_m > max_acc)
+		{
+			a_m = max_acc;
+		}
+		return a_m * a_n;
+	}
 }
 
-void BoidSimulation::HandleBoid(Boid *boid, Boid *other, glm::vec3 *acc)
+glm::vec3 BoidSimulation::HandleBoid(const Boid *boid, const Boid *other, float dist_sqr)
 {
-	glm::vec3 p(1.0f, 1.0f, 1.0f);
-	glm::vec3 p2(1.0f, 1.0f, 1.0f);
-	glm::vec3 p3(1.0f, 1.0f, 1.0f);
+	// acceleration accumulator
+	glm::vec3 acc(0.0f, 0.0f, 0.0f);
 
-	p = p / glm::length(p2);
-	p2 = glm::dot(p, p3) * p2;
+	// displacement vector
+	glm::vec3 disp = other->p - boid->p;
 
-	*acc += p2;
+	// cosine view angle
+	float v_m = glm::length(boid->v);
+	float dist = glm::sqrt(dist_sqr);
+	float view_angle = glm::dot(boid->v, disp) / (v_m * dist);
+
+	// fist apply alignment forces
+	if(dist_sqr < (r_align * r_align) && (view_angle > angle_align))
+	{
+		acc += k_align*(other->v - boid->v);
+	}
+	
+	// then the cohesion forces
+	if( dist_sqr > (r_sep * r_sep) && dist_sqr < (r_coh*r_coh) && (view_angle > angle_coh))
+	{
+		acc += k_coh * disp;
+	}
+	// otherwise the separation forces
+	else if (view_angle > angle_sep)
+	{
+		float acc_m = k_sep / (dist_sqr);
+		if (acc_m * dist > (max_acc))
+		{
+			acc_m = max_acc;
+		}
+
+		acc += -disp * acc_m;
+	}
+
+	return acc;
 }
 
 float BoidSimulation::GetDeltatime()
@@ -499,12 +825,12 @@ void BoidSimulation::SetupBoids()
 	origin_z = -float((bins_z >> 1)) * max_r;
 
 	// approximate the number per bin as the average number of boids per cell in the simulation multiplied by 2 plus 10 (x*2 ensures ratio of at least 2, +10 accounts for sparse grid scenario where num_boids/bins is near zero) 
-	num_per_bin = ((num_boids / (bins_x * bins_y * bins_z)) + 1)*2 + 1 + 10;
+	num_per_cell = ((num_boids / (bins_x * bins_y * bins_z)) + 1)*2 + 1 + 10;
 
 	// the jumps (values needed to jump the grid by one bin)
-	x_jump = bins_y * bins_z * num_per_bin;
-	y_jump = bins_z*num_per_bin;
-	z_jump = num_per_bin;
+	x_jump = bins_y * bins_z * num_per_cell;
+	y_jump = bins_z*num_per_cell;
+	z_jump = num_per_cell;
 
 	// used for finding cell indices
 	x_fact = bins_y * bins_z;
@@ -512,9 +838,9 @@ void BoidSimulation::SetupBoids()
 
 	num_cells = x_fact*bins_x;
 
-	num_bins = x_jump*bins_x;
+	ugrid_len = num_cells*num_per_cell;
 	// initialize the uniform grid
-	uniform_grid.resize(num_bins);
+	uniform_grid.resize(ugrid_len);
 
 	// setup the boid rendering tasks
 	// first get the number of boids per task
@@ -593,11 +919,11 @@ void BoidSimulation::SetupBoids()
 	origin_x,
 	origin_y,
 	origin_z,
-	num_per_bin,
+	num_per_cell,
 	x_jump,
 	y_jump,
 	z_jump,
-	num_bins
+	ugrid_len
 	);
 
 	// reset the boid positions
@@ -614,37 +940,42 @@ void BoidSimulation::SetupWalls()
 	glm::vec3 n(-1.0f, 0.f, 0.f);
 	planes[0].point = p;
 	planes[0].normal = n;
+	planes[0].type = ColliderType::C_Plane;
 
 	// the x- wall
 	p = glm::vec3(-bound_x, 0.f, 0.f);
 	n = glm::vec3(1.0f, 0.f, 0.f);
 	planes[1].point = p;
 	planes[1].normal = n;
+	planes[1].type = ColliderType::C_Plane;
 
 	// the y+ wall
 	p = glm::vec3(0.0f, bound_y, 0.f);
 	n = glm::vec3(0.0f, -1.f, 0.f);
 	planes[2].point = p;
 	planes[2].normal = n;
+	planes[2].type = ColliderType::C_Plane;
 
 	// the y- wall
 	p = glm::vec3(0.f, -bound_y, 0.f);
-	n = glm::vec3(1.0f, 1.f, 0.f);
+	n = glm::vec3(0.0f, 1.f, 0.f);
 	planes[3].point = p;
 	planes[3].normal = n;
+	planes[3].type = ColliderType::C_Plane;
 
 	// the z+ wall
 	p = glm::vec3(0.f, 0.f, bound_z);
 	n = glm::vec3(0.0f, 0.f, -1.0f);
 	planes[4].point = p;
 	planes[4].normal = n;
+	planes[4].type = ColliderType::C_Plane;
 
 	// the z- wall
 	p = glm::vec3(0.0f, 0.f, -bound_z);
 	n = glm::vec3(0.0f, 0.f, 1.f);
 	planes[5].point = p;
 	planes[5].normal = n;
-
+	planes[5].type = ColliderType::C_Plane;
 
 	// create the line wireframe view of the bounding box
 	glm::vec3 p1(bound_x, -bound_y, -bound_z);
@@ -687,42 +1018,49 @@ void BoidSimulation::SetupSpheres()
 	glm::vec3 p(bound_x, bound_y, bound_z);
 	spheres[0].radius = r;
 	spheres[0].point = p;
+	spheres[0].type = ColliderType::C_Sphere;
 
 	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
 	p = glm::vec3(bound_x, bound_y, -bound_z);
 	spheres[1].radius = r;
 	spheres[1].point = p;
+	spheres[1].type = ColliderType::C_Sphere;
 
 	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
 	p = glm::vec3(bound_x, -bound_y, bound_z);
 	spheres[2].radius = r;
 	spheres[2].point = p;
+	spheres[2].type = ColliderType::C_Sphere;
 
 	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
 	p = glm::vec3(bound_x, -bound_y, -bound_z);
 	spheres[3].radius = r;
 	spheres[3].point = p;
+	spheres[3].type = ColliderType::C_Sphere;
 
 	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
 	p = glm::vec3(-bound_x, bound_y, bound_z);
 	spheres[4].radius = r;
 	spheres[4].point = p;
+	spheres[4].type = ColliderType::C_Sphere;
 
 	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
 	p = glm::vec3(-bound_x, bound_y, -bound_z);
 	spheres[5].radius = r;
 	spheres[5].point = p;
+	spheres[5].type = ColliderType::C_Sphere;
 
 	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
 	p = glm::vec3(-bound_x, -bound_y, bound_z);
 	spheres[6].radius = r;
 	spheres[6].point = p;
+	spheres[6].type = ColliderType::C_Sphere;
 
 	r = ((float(std::rand() % max) / float(max))) * (SPHERE_MAXR - SPHERE_MINR) + SPHERE_MINR;
 	p = glm::vec3(-bound_x, -bound_y, -bound_z);
 	spheres[7].radius = r;
 	spheres[7].point = p;
-
+	spheres[7].type = ColliderType::C_Sphere;
 
 	// the remaining spheres can be at random positions
 	for(size_t i = 8; i < NUM_SPHERES; i++)
@@ -738,6 +1076,7 @@ void BoidSimulation::SetupSpheres()
 
 		spheres[i].point = p;
 		spheres[i].radius = r;
+		spheres[i].type = ColliderType::C_Sphere;
 	}
 }
 
@@ -857,7 +1196,7 @@ void BoidSimulation::SortIntoGrid()
 	// set all grid fill values to zero
 	for(size_t i = 0; i < (bins_x*x_fact); i++)
 	{
-		size_t cell = i * num_per_bin;
+		size_t cell = i * num_per_cell;
 		uniform_grid[cell] = 0;
 	}
 
@@ -874,26 +1213,20 @@ void BoidSimulation::SortIntoGrid()
 		size_t cell = index_x * x_fact + index_y * y_fact + index_z;
 		boid->cell_index = cell;
 
-		// place this value in the uniform grid
-		// calculate the position of the first index in the cell
-		cell = cell*num_per_bin;
 		// the fill is located at the first index in the cell
-		uint32_t fill = ++uniform_grid[cell];
-		
+		uint32_t fill = uniform_grid[cell*num_per_cell];
+
 		// if the offset is greater that or equal the available positions in the cell
 		// then travers in the z direction until we find a cell with vacancy
-		if(fill >= num_per_bin)
+		while ((fill+1) >= num_per_cell)
 		{
-			while(fill >= num_per_bin)
-			{
-				uniform_grid[cell]--;
-				cell = (cell+num_per_bin)%num_bins;
-				fill = ++uniform_grid[cell];
-			}
+			cell = (cell + 1) % num_cells;
+			fill = uniform_grid[cell*num_per_cell];
 		}
 
-		// place the index of this boid into this cell
-		uniform_grid[cell + fill] = i;
+		uniform_grid[cell*num_per_cell + fill + 1] = i;
+		// increment the number of elements in the cell
+		uniform_grid[cell*num_per_cell] = fill +1;
 	}
 
 	/*

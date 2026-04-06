@@ -15,12 +15,18 @@
 
 #include <unordered_map>
 
-#define SPHERE_MAXR 20.0f
-#define SPHERE_MINR 6.0f
+#define SPHERE_MAXR 10.0f
+#define SPHERE_MINR 3.0f
 #define NUM_SPHERES 24
 
 #define SIMULATION_THREADS 16
 #define RENDER_THREADS 8
+
+#define MAX_NEIGHBORS 32// the maximum number of neighbors to consider
+
+#define X_SIZE 30.0f
+#define Y_SIZE 40.0f
+#define Z_SIZE 25.0f
 
 enum ColliderType
 {
@@ -133,15 +139,15 @@ private:
 	float max_r;
 	float max_r_inv;
 	// the x, y, z length of the simulation area (the extents will be in both directions (+bound_x to -bound_x)
-	float bound_x = 100.0f;
-	float bound_y = 100.0f;
-	float bound_z = 100.0f;
+	float bound_x = X_SIZE;
+	float bound_y = Y_SIZE;
+	float bound_z = Z_SIZE;
 
 	// the number of bins in the x,y,z directions
 	int32_t bins_x;
 	int32_t bins_y;
 	int32_t bins_z;
-	int32_t num_per_bin;
+	int32_t num_per_cell;
 	
 	// use for array indexing
 	int32_t x_jump; // value needed to jump forward by one bin in the x direction
@@ -175,7 +181,7 @@ private:
 	// the uniform grid (flattened, indexed by x*(bins_y*bins_z*num_per_bin) + y*bins_z*num_per_bin + z * num_per_bin + <index_in_bin> + 1 (the first element in each bin stores how full the bin is)
 	std::vector<uint32_t> uniform_grid;
 	size_t num_cells;
-	size_t num_bins;
+	size_t ugrid_len;
 
 	std::unordered_map<size_t, std::vector<Collider*>> collider_map;
 	// rendering stuff
@@ -246,17 +252,20 @@ private:
 	void SimulateBoids(size_t thread_id, float dt);
 
 	// calculate the acceleration for a plane that is in range
-	void HandlePlane(Boid* boid, Plane* plane, glm::vec3* acc);
+	glm::vec3 HandlePlane(const Boid* boid, const Plane* plane, float dist_sqr);
 	// calculate the acceleration for a sphere that is in range
-	void HandleSphere(Boid *boid, Sphere *sphere, glm::vec3 *acc);
+	glm::vec3 HandleSphere(const Boid *boid, const Sphere *sphere, float dist_sqr);
 	// calculate the effect of a boid on another boid
-	void HandleBoid(Boid *boid, Boid *other, glm::vec3 *acc);
+	glm::vec3 HandleBoid(const Boid *boid, const Boid *other, float dist_sqr);
 
 	// different from sort into grid (much faster since it uses pre-calculated cell indices from the boids)
 	void UpdateGrid();
 
 	// the rendering function
 	void AddBoidRenderable(size_t thread_id);
+
+	uint32_t CellFill(size_t cell_id); // get the fill value at a cell
+	uint32_t PushOnGrid(size_t cell_id, uint32_t boid_id); // add a boid to a cell
 
 };
 
