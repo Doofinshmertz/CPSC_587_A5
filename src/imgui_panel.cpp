@@ -46,9 +46,9 @@ namespace imgui_panel {
 	float sim_delta = 0.0f;
 
 	float bounds[3] = {100.0f, 100.0f, 100.0f};
-	int num_spheres = 14;
-	float sphere_max_r = 10.0f;
-	float sphere_min_r = 4.0f;
+	int num_spheres = 28;
+	float sphere_max_r = 30.0f;
+	float sphere_min_r = 10.0f;
 
 	std::function<void(void)> draw = [](void) {
 		if (showPanel) {

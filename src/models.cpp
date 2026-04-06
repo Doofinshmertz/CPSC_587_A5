@@ -197,8 +197,7 @@ void BoidSimulation::SimulationLoop()
 		//ResetBoidPositions();
 		
 		// update the grid
-		//UpdateHashGrid();
-		UpdateGrid();
+		UpdateHashGrid();
 		array_mutex.lock();
 		// swap buffers
 		std::vector<Boid>* temp = start_positions.load();
@@ -243,32 +242,6 @@ void BoidSimulation::UpdateHashGrid()
 				}
 			}
 		}
-	}
-}
-
-void BoidSimulation::UpdateGrid()
-{
-	// set the fill values to zero
-	for(size_t i = 0; i < num_cells; i++)
-	{
-		uniform_grid[i*num_per_cell] = 0;
-	}
-
-	// iterate over the boids and place them in appropriate cells
-	for(size_t i = 0; i < num_boids; i++)
-	{
-		// the get cell value of the current boid
-		size_t cell_index = (*to_positions)[i].cell_index % num_cells;
-		uint32_t fill = uniform_grid[cell_index*num_per_cell];
-
-		while((fill+1) >= num_per_cell)
-		{
-			cell_index = (cell_index + 1) % num_cells;
-			fill = uniform_grid[cell_index*num_per_cell];
-		}
-
-		uniform_grid[cell_index*num_per_cell + fill + 1] = i;
-		uniform_grid[cell_index*num_per_cell] = fill+1;
 	}
 }
 
@@ -477,7 +450,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		//printf("tr: %lu, checkpoint 10\n", thread_id);
 		//std::cout << std::flush;
 
-		/*
+		
 		std::vector<uint32_t>* neighbors = &hash_grid[boid->cell_index];
 
 		glm::vec3 acc_bo(0.0f, 0.0f, 0.0f);
@@ -499,53 +472,6 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 			{
 				acc_bo += HandleBoid(boid, other, dist_sqr);
 				num_neighbors++;
-			}
-		}
-		*/
-
-		
-		// acceleration accumulator for the urges
-		glm::vec3 acc_bo(0.0f, 0.0f, 0.0f);
-
-		for (int32_t x_idx = -x_fact; x_idx <= x_fact; x_idx += x_fact)
-		{
-			// iterate over the y coordinate
-			for (int32_t y_idx = -y_fact; y_idx <= y_fact; y_idx += y_fact)
-			{
-
-				// iterate over the z coordinate
-				for (int32_t z_idx = -1; z_idx <= 1; z_idx++)
-				{
-					// if the number of neighbors exceeds a certian number the stop
-					if (num_neighbors >= MAX_NEIGHBORS)
-					{
-						break;
-					}
-					//printf("tr: %lu, checkpoint 11\n", thread_id);
-					//std::cout << std::flush;
-					// the cell key
-					size_t key = (cell + x_idx + y_idx + z_idx) % num_cells;
-
-					// for each boid in this cell calculate its effect on the current boid
-					size_t fill = uniform_grid[key*num_per_cell];
-
-					for (size_t j = 1; j <= fill; j++)
-					{
-						Boid *other = &((*boids_end)[uniform_grid[key*num_per_cell + j]]);
-						// check the distance, if it is within the max distance then apply forces
-						if(other == boid){continue;}
-						glm::vec3 disp = other->p - boid->p;
-						float dist_sqr = disp.x * disp.x + disp.y * disp.y + disp.z * disp.z;
-						if (dist_sqr < (max_r * max_r))
-						{
-							acc_bo += HandleBoid(boid, other, dist_sqr);
-							num_neighbors++;
-						}
-						
-					}
-					//printf("tr: %lu, checkpoint 12\n", thread_id);
-					//std::cout << std::flush;
-				}
 			}
 		}
 		
@@ -807,6 +733,10 @@ void BoidSimulation::render(const ModelViewContext &view)
 	array_mutex.lock();
 	// the interpolation factor
 	float interp = (elapsed_time.load() / delta_time.load());
+	if(interp > 1.2f)
+	{
+		interp = 1.2f;
+	}
 
 	//printf("delta_time: %5.3f, elapsed_time: %5.3f, interp %6.4f\n",delta_time.load(), elapsed_time.load(), interp);
 	// dispatch render threads
@@ -858,13 +788,54 @@ void BoidSimulation::AddBoidRenderable(size_t thread_id, float interp)
 		// calculate the acceleration
 		glm::vec3 a_avg = (v_end - v_start) * ((1.0f)/ delta_time);
 
-		// add gravity to the acceleration (if you are not moving in a gravitational feild, then you must be accelerating against it)
-		a_avg.y += 9.81f;
+		// low pass filter with previous values
+		a_avg = 0.1f*a_avg + 0.9f*accelerations[i];
+		accelerations[i] = a_avg;
 
-		// calculate the new position
+		// calculate the new position and velocity
 		p_start = (p_end - p_start)*interp + p_start;
 		v_start = (v_end - v_start)*interp + v_start;
-		givr::addInstance(boid_render[thread_id], glm::translate(glm::mat4(1.0f), p_start));
+
+		p_start = 0.1f*p_start + 0.9f*positions[i];
+		positions[i] = p_start;
+
+		v_start = 0.1f*v_start + 0.9f*velocities[i];
+		velocities[i] = v_start;
+		glm::vec3 gravity(0.0f, -9.81f, 0.0f);
+		// the tangents
+		glm::vec3 T = glm::normalize(v_start);
+
+		// gravity tangent
+		glm::vec3 g_tan = gravity - glm::dot(gravity, T) * T;
+
+		// total acceleration vector
+		glm::vec3 N = glm::normalize((a_avg - g_tan));
+
+		// bi-normal
+		glm::vec3 B = glm::cross(N, T);
+
+		glm::mat4 M = glm::mat4{1.0f};
+
+		M[0][0] = B.x;
+		M[0][1] = B.y;
+		M[0][2] = B.z;
+
+		M[1][0] = N.x;
+		M[1][1] = N.y;
+		M[1][2] = N.z;
+
+		M[2][0] = T.x;
+		M[2][1] = T.y;
+		M[2][2] = T.z;
+
+		M[3][0] = p_start.x;
+		M[3][1] = p_start.y;
+		M[3][2] = p_start.z;
+
+	
+		M = glm::scale(M, glm::vec3{3.0f});
+
+		givr::addInstance(boid_render[thread_id], M);
 	}
 }
 
@@ -887,7 +858,9 @@ void BoidSimulation::SetupBoids()
 	boids_a.resize(num_boids);
 	boids_b.resize(num_boids);
 	boids_c.resize(num_boids);
-
+	accelerations.resize(num_boids);
+	positions.resize(num_boids);
+	velocities.resize(num_boids);
 	// set the arrays for rendering and simulation
 	start_positions.store(&boids_a);
 	end_positions.store(&boids_b);
@@ -928,9 +901,6 @@ void BoidSimulation::SetupBoids()
 	num_cells = x_fact*bins_x;
 
 	ugrid_len = num_cells*num_per_cell;
-	// initialize the uniform grid
-	uniform_grid.resize(ugrid_len);
-
 	hash_grid.resize(num_cells);
 
 	// setup the boid rendering tasks
@@ -1293,9 +1263,6 @@ void BoidSimulation::SortIntoGrid()
 	// set all grid fill values to zero
 	for(size_t i = 0; i < (num_cells); i++)
 	{
-		size_t cell = i * num_per_cell;
-		uniform_grid[cell] = 0;
-
 		hash_grid[i].clear();
 		hash_grid[i].reserve(num_per_cell);
 	}
@@ -1325,23 +1292,6 @@ void BoidSimulation::SortIntoGrid()
 				}
 			}
 		}
-
-		// the fill is located at the first index in the cell
-		uint32_t fill = uniform_grid[cell*num_per_cell];
-
-		// if the offset is greater that or equal the available positions in the cell
-		// then travers in the z direction until we find a cell with vacancy
-		while ((fill+1) >= num_per_cell)
-		{
-			cell = (cell + 1) % num_cells;
-			fill = uniform_grid[cell*num_per_cell];
-		}
-
-		uniform_grid[cell*num_per_cell + fill + 1] = i;
-		// increment the number of elements in the cell
-		uniform_grid[cell*num_per_cell] = fill +1;
-
-
 	}
 
 
@@ -1429,93 +1379,3 @@ bool allValid(const std::vector<Sphere> &spheres)
 	return std::all_of(spheres.begin(), spheres.end(), [](const Sphere &sphere)
 					   { return sphere.isValid(); });
 }
-
-namespace simulation {
-	namespace primatives {
-
-
-
-	}// namespace primatives
-
-	namespace models {
-
-		BoidsModel::BoidsModel()
-			: boid_geometry(givr::geometry::Mesh(givr::geometry::Filename("./models/dart.obj")))
-			, boid_style(givr::style::Colour(1.f, 1.f, 0.f), givr::style::LightPosition(100.f, 100.f, 100.f))
-			, wall_geometry()
-			, wall_style(givr::style::Colour(0.f, 1.0f, 0.0f))
-			, sphere_geometry(givr::geometry::Radius(1.0f))
-			, sphere_style(givr::style::Colour(1.0f, 0.0f, 1.0f), givr::style::LightPosition(100.0f, 100.0f, 100.0f))
-		{
-			// Reset Dynamic elements
-			reset();
-
-			// create a triangle for the wall
-			glm::vec3 v1 = glm::vec3(0.0f,0.0f,0.0f);
-			glm::vec3 v2 = glm::vec3(1.0f, 0.0f, 0.0f);
-			glm::vec3 v3 = glm::vec3(0.0f, 0.0f, 1.0f);
-
-			wall_geometry.push_back(
-				givr::geometry::Line(givr::geometry::Point1(v1), givr::geometry::Point2(v2))
-			);
-
-
-			// Render
-			boid_render = givr::createInstancedRenderable(boid_geometry, boid_style);
-			wall_render = givr::createRenderable(wall_geometry, wall_style);
-			sphere_render = givr::createInstancedRenderable(sphere_geometry, sphere_style);
-		}
-
-		void BoidsModel::reset() {
-			// static so they are persistent
-			static std::random_device random_device;
-			static std::mt19937 generator(random_device());
-			static std::uniform_real_distribution<double> position_distribution(-10., 10.);
-			static std::uniform_real_distribution<double> theta_distribution(-180., 180.);
-			static std::uniform_real_distribution<double> phi_distribution(-90., 90.);
-			static std::uniform_real_distribution<double> speed_distribution(5., 25.);
-
-			boids.resize(n_boids);
-			for (Boid& boid : boids) {
-				//Random Position in 20 x 20 x 20 cube
-				boid.p.x = position_distribution(generator);
-				boid.p.y = position_distribution(generator);
-				boid.p.z = position_distribution(generator);
-
-				//Random heading (two angles) and Random speed
-				double theta = glm::radians(theta_distribution(generator));
-				double phi = glm::radians(phi_distribution(generator));
-				double speed = speed_distribution(generator);
-
-				// https://stackoverflow.com/questions/30011741/3d-vector-defined-by-2-angles
-				boid.v.x = speed * std::cos(theta) * std::cos(phi);
-				boid.v.y = speed * std::sin(phi);
-				boid.v.z = speed * std::sin(theta) * std::cos(phi);
-
-			}
-		}
-
-		void BoidsModel::step(float dt) {
-			reset(); // Comment this out
-			//TODO: apply forces and compute integration step
-		}
-
-		void BoidsModel::render(const ModelViewContext& view) {
-			//Add Mass render
-			for (const Boid& boid : boids)
-				givr::addInstance(boid_render, glm::translate(glm::mat4(1.f), boid.p)); //NEED TO FRAME!!!
-			
-			givr::addInstance(sphere_render, glm::mat4(1.0f));
-
-			//Render
-			givr::style::draw(wall_render, view);
-			givr::style::draw(boid_render, view);
-			givr::style::draw(sphere_render, view);
-		}
-
-		bool BoidsModel::isValid() const {
-			return allValid(boids); // && primatives::allValid(planes) && primatives::allValid(spheres);
-		}
-
-	} // namespace models
-} // namespace simulation

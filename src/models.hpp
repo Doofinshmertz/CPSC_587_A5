@@ -20,8 +20,8 @@
 #define SPHERE_MINR 2.0f
 #define NUM_SPHERES 8
 
-#define SIMULATION_THREADS 16
-#define RENDER_THREADS 8
+#define SIMULATION_THREADS 20
+#define RENDER_THREADS 4
 
 #define MAX_NEIGHBORS 256// the maximum number of neighbors to consider
 
@@ -112,6 +112,12 @@ private:
 	// the pointer to the array that is to be written to
 	std::atomic<std::vector<Boid>*> to_positions = nullptr;
 
+	// this vector stors the past accelerations, velocity and positions
+	// used for low pass filtering the acceleration and position
+	std::vector<glm::vec3> accelerations;
+	std::vector<glm::vec3> positions;
+	std::vector<glm::vec3> velocities;
+
 	// detection angles
 	float angle_sep;
 	float angle_align;
@@ -187,11 +193,9 @@ private:
 	// the mutex for preventing the arrays from being accessed while being swaped
 	std::mutex array_mutex;
 	// the uniform grid (flattened, indexed by x*(bins_y*bins_z*num_per_bin) + y*bins_z*num_per_bin + z * num_per_bin + <index_in_bin> + 1 (the first element in each bin stores how full the bin is)
-	std::vector<uint32_t> uniform_grid;
+	std::vector<std::vector<uint32_t>> hash_grid;
 	size_t num_cells;
 	size_t ugrid_len;
-
-	std::vector<std::vector<uint32_t>> hash_grid;
 
 	std::unordered_map<size_t, std::vector<Collider*>> collider_map;
 
@@ -271,8 +275,6 @@ private:
 	glm::vec3 HandleBoid(const Boid *boid, const Boid *other, float dist_sqr);
 
 	// different from sort into grid (much faster since it uses pre-calculated cell indices from the boids)
-	void UpdateGrid();
-
 	void UpdateHashGrid();
 
 	// the rendering function
@@ -287,65 +289,3 @@ private:
 namespace glm {
 	bool isallfinite(glm::vec3 v);
 }
-
-namespace simulation {
-	namespace primatives {
-
-
-	} // namespace primatives
-
-	namespace models {
-		//If you want to use a different view, change this and the one in main
-		using ModelViewContext = givr::camera::ViewContext<
-			givr::camera::TurnTableCamera, 
-			givr::camera::PerspectiveProjection
-		>;
-		// Abstract class used by all models
-		class GenericModel {
-		public:
-			virtual void reset() = 0;
-			virtual void step(float dt) = 0;
-			virtual void render(const ModelViewContext& view) = 0;
-			virtual bool isValid() const { return true; } // Don't HAVE to define
-		};
-
-		//Model for simulation
-		class BoidsModel : public GenericModel {
-		public:
-			BoidsModel();
-			void reset();
-			void step(float dt);
-			void render(const ModelViewContext& view);
-			bool isValid() const;
-
-			//Simulation Constants (you can re-assign values here from imgui)
-			glm::vec3 g = { 0.f, -9.81f, 0.f };
-			size_t n_boids = 100; //need alot more eventually for full assignment
-
-		private:
-			//Simulation Parts
-			std::vector<Boid> boids;
-			//std::vector<primatives::plane> planes;
-			//std::vector<primatives::sphere> spheres;
-
-			//Render
-			givr::geometry::Mesh boid_geometry;
-			givr::style::Phong boid_style;
-			givr::InstancedRenderContext<givr::geometry::Mesh, givr::style::Phong> boid_render;
-
-			givr::geometry::MultiLine wall_geometry;
-			givr::style::LineStyle wall_style;
-			givr::RenderContext<givr::geometry::MultiLine, givr::style::LineStyle> wall_render;
-
-			//givr::geometry::TriangleSoup wall_geometry;
-			//givr::style::Phong wall_style;
-			// Maybe changed this (below) to instanced render????????
-			//givr::RenderContext<givr::geometry::TriangleSoup, givr::style::Phong> wall_render;
-
-			givr::geometry::Sphere sphere_geometry;
-			givr::style::Phong sphere_style;
-			givr::InstancedRenderContext<givr::geometry::Sphere, givr::style::Phong> sphere_render;
-		};
-
-	} // namespace models
-} // namespace simulation

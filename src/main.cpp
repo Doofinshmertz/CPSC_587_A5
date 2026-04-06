@@ -93,7 +93,7 @@ int main(void) {
 		,imgui_panel::sphere_min_r
 		,imgui_panel::n_boids);
 
-	view.camera.zoom(100.0f);
+	view.camera.zoom(300.0f);
 	// main loop
 	mainloop(std::move(window), [&](
 		float /*dt - Time since last frame. 
@@ -104,11 +104,13 @@ int main(void) {
 		// updates from panel
 		if (imgui_panel::reset_view) {
 			view.camera.reset();
-			view.camera.zoom(100.0f);
+			view.camera.zoom(300.0f);
 		}
 
 		if(imgui_panel::apply_settings)
 		{
+			view.camera.reset();
+			view.camera.zoom(imgui_panel::bounds[1]*3.0f);
 			// update the settings on the environment
 			model->SetSimulationParameters(				
 				imgui_panel::angle_sep
