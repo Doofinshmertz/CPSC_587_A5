@@ -62,7 +62,6 @@ namespace imgui_panel {
 				ImGui::Spacing();
 				ImGui::Separator();
 
-				ImGui::SliderInt("Iterations Per Frame", &number_of_iterations_per_frame, 1, 100);
 				if(ImGui::Checkbox("Play Simulation", &play_simulation))
 				{
 					play_pause = true;
@@ -71,8 +70,6 @@ namespace imgui_panel {
 				if (!play_simulation) {
 					step_simulation = ImGui::Button("Step Simulation");
 				}
-				ImGui::DragFloat("Simulation dt (s)", &dt_simulation, 1.e-5f, 1.e-6f, 1.f, "%.6e");
-				ImGui::Checkbox("Validity Check (potentially slow)", &enable_validity_check);
 
 				ImGui::Spacing();
 				ImGui::Separator();
@@ -168,6 +165,56 @@ namespace imgui_panel {
 
 				ImGui::Spacing();
 				ImGui::Separator();
+
+				if(ImGui::Button("Setup Scenario 100,000"))
+				{
+					n_boids = 100000;
+					angle_sep = 175.0f;
+					angle_align = 140.0f;
+					angle_coh = 120.0f;
+					r_sep = 6.0f;
+					r_align = 8.0f;
+					r_coh = 10.0f;
+					k_sep = 100.0f;
+					k_align = 3.0f;
+					k_coh = 0.4f;
+					offset = 1.0f;
+					k_repulsion = 3.0f;
+					max_speed = 20.0f;
+					max_acceleration = 100.0f;
+					apply_settings = true;
+					bounds[0] = 200.0f;
+					bounds[1] = 200.0f;
+					bounds[2] = 40.0f;
+					num_spheres = 40;
+					sphere_max_r = 50.0f;
+					sphere_min_r = 20.0f;
+				}
+
+				if (ImGui::Button("Setup Scenario EXTREME (minimum requirements RTX 3070 + core i7 13700)"))
+				{
+					n_boids = 200000;
+					angle_sep = 175.0f;
+					angle_align = 140.0f;
+					angle_coh = 120.0f;
+					r_sep = 6.0f;
+					r_align = 8.0f;
+					r_coh = 10.0f;
+					k_sep = 100.0f;
+					k_align = 3.0f;
+					k_coh = 0.4f;
+					offset = 1.0f;
+					k_repulsion = 3.0f;
+					max_speed = 20.0f;
+					max_acceleration = 100.0f;
+					apply_settings = true;
+					bounds[0] = 200.0f;
+					bounds[1] = 200.0f;
+					bounds[2] = 200.0f;
+					num_spheres = 40;
+					sphere_max_r = 50.0f;
+					sphere_min_r = 20.0f;
+				}
 			}
 			ImGui::End();
 		}

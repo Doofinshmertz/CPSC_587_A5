@@ -6,10 +6,10 @@
 // constructor
 BoidSimulation::BoidSimulation()
 	: boid_geometry(givr::geometry::Mesh(givr::geometry::Filename("./models/dart.obj"))),
-	boid_style(givr::style::Colour(1.f, 1.f, 0.f), givr::style::LightPosition(100.f, 100.f, 100.f)),
+	boid_style(givr::style::Colour(1.f, 1.f, 0.f), givr::style::LightPosition(1000.f, 1000.f, 1000.f)),
 	wall_geometry(), wall_style(givr::style::Colour(0.f, 1.0f, 0.0f)),
 	sphere_geometry(givr::geometry::Radius(1.0f)),
-	sphere_style(givr::style::Colour(1.0f, 0.0f, 1.0f), givr::style::LightPosition(100.0f, 100.0f, 100.0f))
+	sphere_style(givr::style::Colour(1.0f, 0.0f, 1.0f), givr::style::LightPosition(1000.0f, 1000.0f, 1000.0f))
 {
 	new_buffers = true;
 	elapsed_time = 0.0f;
@@ -44,8 +44,7 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 	size_t _num_boids)
 {
 
-	// reset this when the simulation is re-started
-	last_render_time = std::chrono::steady_clock::now();
+
 
 	// need to re-calculate grid spacing
 	// re-initialze the boids
@@ -58,6 +57,10 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 		stop_simulation = true;
 
 		main_loop_thread.join();
+
+		array_mutex.lock();
+		// reset this when the simulation is re-started
+		last_render_time = std::chrono::steady_clock::now();
 
 		// set all values
 		angle_sep = std::cos(glm::radians(_angle_sep));
@@ -85,13 +88,16 @@ void BoidSimulation::SetSimulationParameters(float _angle_sep, float _angle_alig
 
 		printf("main loop should have stopped\n");
 		SetupSimulation();
-		stop_simulation = false;
 
+		array_mutex.unlock();
+		stop_simulation = false;
 		// start the simulation loop
 		main_loop_thread = std::thread(&BoidSimulation::SimulationLoop, this);
 	}
 	else
 	{
+		// reset this when the simulation is re-started
+		last_render_time = std::chrono::steady_clock::now();
 		// set all values
 		angle_sep = std::cos(glm::radians(_angle_sep));
 		angle_align = std::cos(glm::radians(_angle_align));
@@ -188,11 +194,13 @@ void BoidSimulation::SimulationLoop()
 			threads_sim[i] = std::thread(&BoidSimulation::SimulateBoids, this, i, del);
 		}
 		
+
 		// join threads
 		for (size_t i = 0; i < SIMULATION_THREADS; i++)
 		{
 			threads_sim[i].join();
 		}
+		
 
 		//ResetBoidPositions();
 		
@@ -208,6 +216,7 @@ void BoidSimulation::SimulationLoop()
 		array_mutex.unlock();
 		// reset the elapsed time
 		elapsed_time = 0.0f;
+		
 
 		// measure the time step
 		end_t = std::chrono::steady_clock::now();
@@ -224,7 +233,7 @@ void BoidSimulation::UpdateHashGrid()
 		hash_grid[i].clear();
 		hash_grid[i].reserve(num_per_cell);
 	}
-
+	
 	// iterate over the boids and place them in appropriate cells
 	for (size_t i = 0; i < num_boids; i++)
 	{
@@ -237,11 +246,15 @@ void BoidSimulation::UpdateHashGrid()
 			{
 				for (int z = -1; z <= 1; z++)
 				{
-					int32_t key = cell_index + x * x_fact + y * y_fact + z;
-					hash_grid[key].push_back(i);
+					int32_t key = (cell_index + x * x_fact + y * y_fact + z) % num_cells;
+					if(hash_grid[key].size() < MAX_NEIGHBORS)
+					{
+						hash_grid[key].push_back(i);
+					}
 				}
 			}
 		}
+		
 	}
 }
 
@@ -249,6 +262,8 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 {
 	size_t start = sim_tasks[thread_id].start_index;
 	size_t end = sim_tasks[thread_id].end_index;
+
+	if(end == start){return;}
 
 	std::vector<Boid> *boids_to = to_positions.load();
 	std::vector<Boid> *boids_end = end_positions.load();
@@ -399,33 +414,43 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 										float v_m = glm::length(v_n);
 										v_n = v_n / v_m;
 
-										// the displacement vector
-										glm::vec3 pc = boid->p - sphere->point;
-										glm::vec3 pc_n = glm::normalize(pc);
+										// calculate if we are going to hit the sphere
 
-										// the acceleration normal
-										glm::vec3 a_n = v_n - glm::dot(v_n, pc_n) * pc_n;
-										float mag = a_n.x * a_n.x + a_n.y * a_n.y + a_n.z * a_n.z;
-										// if velocity is pointing directly at the normal, choose a different vector to get it out of this scenario
-										if (mag < 0.0001f)
+										// positive if we are facing the sphere
+										float v_dot_dist = -glm::dot(v_n, pc);
+										if(v_dot_dist > 0.0f)
 										{
-											a_n = glm::vec3(pc_n.y, pc_n.z, pc_n.x);
-											mag = a_n.x * a_n.x + a_n.y * a_n.y + a_n.z * a_n.z;
+											// does our path intersect the sphere
+											float pass_sqr = dist_sqr - (v_dot_dist * v_dot_dist);
+											if(pass_sqr < (detect_dist*detect_dist))
+											{
+												glm::vec3 pc_n = glm::normalize(pc);
+
+												// the acceleration normal
+												glm::vec3 a_n = v_n - glm::dot(v_n, pc_n) * pc_n;
+												float mag = a_n.x * a_n.x + a_n.y * a_n.y + a_n.z * a_n.z;
+												// if velocity is pointing directly at the normal, choose a different vector to get it out of this scenario
+												if (mag < 0.0001f)
+												{
+													a_n = glm::vec3(pc_n.y, pc_n.z, pc_n.x);
+													mag = a_n.x * a_n.x + a_n.y * a_n.y + a_n.z * a_n.z;
+												}
+
+												mag = glm::sqrt(mag);
+												a_n = a_n / mag;
+
+												// now calculate the radius
+												float surface = sphere->radius + offset;
+												float r = ((pc.x * pc.x + pc.y * pc.y + pc.z * pc.z) - surface * surface) / (2.0f * (surface - glm::dot(a_n, pc)));
+
+												float a_m = v_m * v_m / r;
+												if (std::isnan(a_m) || std::isinf(a_m) || a_m > max_acc)
+												{
+													a_m = max_acc;
+												}
+												acc_obs += a_m * a_n;
+											}
 										}
-
-										mag = glm::sqrt(mag);
-										a_n = a_n / mag;
-
-										// now calculate the radius
-										float surface = sphere->radius + offset;
-										float r = ((pc.x * pc.x + pc.y * pc.y + pc.z * pc.z) - surface * surface) / (2.0f * (surface - glm::dot(a_n, pc)));
-
-										float a_m = v_m * v_m / r;
-										if (std::isnan(a_m) || std::isinf(a_m) || a_m > max_acc)
-										{
-											a_m = max_acc;
-										}
-										acc_obs += a_m * a_n;
 									}
 								}
 								//printf("tr: %lu, checkpoint 9\n", thread_id);
@@ -451,7 +476,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		//std::cout << std::flush;
 
 		
-		std::vector<uint32_t>* neighbors = &hash_grid[boid->cell_index];
+		std::vector<uint32_t>* neighbors = &hash_grid[(boid->cell_index) % num_cells];
 
 		glm::vec3 acc_bo(0.0f, 0.0f, 0.0f);
 		size_t n = neighbors->size();
@@ -562,7 +587,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		size_t index_z = (p.z - origin_z) * max_r_inv;
 		//printf("tr: %lu, checkpoint 18\n", thread_id);
 
-		boid_to->cell_index = index_x * x_fact + index_y * y_fact + index_z;
+		boid_to->cell_index = (index_x * x_fact + index_y * y_fact + index_z)%num_cells;
 		//printf("tr: %lu, checkpoint 19\n", thread_id);
 		//std::cout << std::flush;
 	}
@@ -688,19 +713,20 @@ glm::vec3 BoidSimulation::HandleBoid(const Boid *boid, const Boid *other, float 
 	{
 		return glm::vec3(0.0f, 0.0f, 0.0f);
 	}
+
 	// case for cohesion
-	else if((dist > r_align) && (view_angle > angle_coh))
+	if((dist > r_align) && (view_angle > angle_coh))
 	{
 		acc = k_coh * disp;
 		return acc;
 	}
-	// case for alignment
-	else if((dist > r_sep) && (view_angle > angle_align))
+	// apply alignment
+	else if ((dist > r_sep) && (view_angle > angle_align))
 	{
-		acc = k_align*(other->v - boid->v);
+		acc = k_align * (other->v - boid->v);
 		return acc;
 	}
-	// case for separation
+	// case for separation (do not apply cohesion while separating
 	else if(view_angle > angle_sep)
 	{
 		float acc_m = k_sep / (dist_sqr);
@@ -723,14 +749,16 @@ float BoidSimulation::GetDeltatime()
 
 void BoidSimulation::render(const ModelViewContext &view)
 {
+	// we are going to be reading from the arrays so do not let them get swaped
+	array_mutex.lock();
+
 	// render spheres
 	for(size_t i = 0; i < num_spheres; i++)
 	{
 		givr::addInstance(sphere_render, glm::scale( glm::translate(glm::mat4(1.0f), spheres[i].point), glm::vec3(spheres[i].radius, spheres[i].radius, spheres[i].radius)));
 	}
 
-	// we are going to be reading from the arrays so do not let them get swaped
-	array_mutex.lock();
+
 	// the interpolation factor
 	float interp = (elapsed_time.load() / delta_time.load());
 	if(interp > 1.2f)
@@ -901,6 +929,7 @@ void BoidSimulation::SetupBoids()
 	num_cells = x_fact*bins_x;
 
 	ugrid_len = num_cells*num_per_cell;
+	hash_grid.clear();
 	hash_grid.resize(num_cells);
 
 	// setup the boid rendering tasks
