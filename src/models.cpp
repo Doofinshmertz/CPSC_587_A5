@@ -191,6 +191,10 @@ void BoidSimulation::SimulationLoop()
 		if(is_paused)
 		{
 			std::this_thread::sleep_for(std::chrono::milliseconds(20));
+			// measure the time step
+			end_t = std::chrono::steady_clock::now();
+			delta_time = (std::chrono::duration<float, std::ratio<1>>(end_t - start_t)).count();
+			start_t = end_t;
 			continue;
 		}
 
