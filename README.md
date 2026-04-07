@@ -4,88 +4,125 @@ CPSC 587 Assignment 4,
 Holden Holzer, holden.holzer@ucalgary.ca
 ## AI Statement
 No AI was used. 
-## Spring and Mass Force Calculations
-Each spring is modeled as a connection between two masses. There are two forces that the spring imparts of the the masses. First the spring force which modeled as being linearly proportional to the change in length of the spring from the rest length of the spring:
-$$ F_s = -k(x - r)$$
-Where $F_s$ is the force in [N], $k$ is the spring constant in [N/m], $r$ is the rest length of the spring [m], and x is the difference in position between the ends of the spring [m]. \
-If we suppose that the position in 3 dimensions of the two masses at the ends of the spring are $\lbrace P, Q\rbrace$ then the spring force in 3 dimensions is: $$ \vec{F_s} = -k(\lvert\lvert P - Q \rvert\rvert - r) \cdot \frac{P - Q}{\lvert\lvert P - Q\rvert\rvert} $$
-The second force to consider is the viscous damping force, this is modeled as being linearly proportional to the speed of extension or contraction of the spring. $$ F_d = -c\frac{dx}{dt}$$
-Where $F_d$ is the damping force [N], $c$ is the viscous damping coefficient in [N*s/m], and dx/dt is the velocity of the extension of the spring in [m/s]. Suppose the velocities of the two masses are $\lbrace v_p, v_q\rbrace$ In 3 dimensions this force is:$$\vec{F_d} = -c \frac{(v_p - v_q)\cdot(P - Q)}{\lvert\lvert P - Q\rvert\rvert}\frac{(P - Q)}{\lvert\lvert P - Q\rvert\rvert}$$
-The resulting forces on each mass is:$$F_Q = F_s + F_d$$ $$F_P = -F_s - F_d = -F_Q$$
-During each iteration of the simulation, the forces from each spring are calculated and added to the forces on each mass.   
+## The Three Boid Forces
+I you imagine that the forces are coming from air (like how a flock of birds impart forces on the air not eachother) then the Boid forces could be satisfying Newtons Third law.
+### Separation
+The separation force is used to push boids away from each other if they get too close. We define the distance where this force starts as $r_s$ the radius of separation. Since the Boid is intended to model a flocking animal, we also only want it to come into effect if the boid to avoid (we will denote as $b_j$) is in the field of view of the current boid (denote as $b_i$). The field of view will be defined by the angle $\alpha_s$. In this simulation the force was made proportional to the inverse of the distance between the two boids. The calculation of the separation force is as follows:
+1. If the distance between the two boids is within the detection distance $\lvert\lvert p_j - p_i\rvert\rvert < r_s$ then:
+2. If it is in the field of view: $$cos^{-1}\left(\frac{(p_j - p_i) \cdot v_i}{\lvert\lvert p_j - p_i\rvert\rvert \lvert\lvert v_i\rvert\rvert}\right) < \alpha_s$$
+Note here that we assume boid i is face in its direction of motion $v_i$ (In the simulation, $cos(\alpha_s)$ is pre calculated to avoid the use of trigonometric functions.
+3. Within the detection distance and field of view then the force/acceleration is:$$a^s_{ij} = -k_s \cdot \frac{(p_j - p_i)}{\lvert\lvert p_j - p_i\rvert\rvert} \frac{1}{\lvert\lvert p_j - p_i\rvert\rvert}$$
+Where $k_s$ is the separation force constant. 
+### Alignment
+The alignment force is used to make boids move in the same direction. Like with the separation force, this has an associated detection distance and view angle $r_{align}$ and $\alpha_{align}$ In this simulation the force was made proportional to the velocity difference between the two boids. The calculation of the alignment force is as follows:
+1. If the distance between the two boids is within the detection distance $\lvert\lvert p_j - p_i\rvert\rvert < r_{align}$ then:
+2. If it is in the field of view: $$cos^{-1}\left(\frac{(p_j - p_i) \cdot v_i}{\lvert\lvert p_j - p_i\rvert\rvert \lvert\lvert v_i\rvert\rvert}\right) < \alpha_{align}$$
+Note here that we assume boid i is face in its direction of motion $v_i$ (In the simulation, $cos(\alpha_{align})$ is pre calculated to avoid the use of trigonometric functions.
+3. Within the detection distance and field of view then the force/acceleration is:$$a^{align}_{ij} = -k_a \cdot (v_j - v_i) $$
+Where $k_a$ is the alignment force constant. 
+### Cohesion
+The Cohesion force is used to make boids group together. Like with the separation force, this has an associated detection distance and view angle $r_{c}$ and $\alpha_{c}$ In this simulation the force was made proportional to the distance between the two boids. The calculation of the alignment force is as follows:
+1. If the distance between the two boids is within the detection distance $\lvert\lvert p_j - p_i\rvert\rvert < r_{c}$ then:
+2. If it is in the field of view: $$cos^{-1}\left(\frac{(p_j - p_i) \cdot v_i}{\lvert\lvert p_j - p_i\rvert\rvert \lvert\lvert v_i\rvert\rvert}\right) < \alpha_{c}$$
+Note here that we assume boid i is face in its direction of motion $v_i$ (In the simulation, $cos(\alpha_{c})$ is pre calculated to avoid the use of trigonometric functions.
+3. Within the detection distance and field of view then the force/acceleration is:$$a^c_{ij} = -k_c \cdot (p_j - p_i) $$
+Where $k_c$ is the cohesion force constant. 
+## Combining these forces
+The forces are combined in the following ways: 
+### Ordering:
+The forces are applied such that for each neighbor $b_j$ of boid $b_i$. Only one force type is applied at a time. The forces use the detection distances to determine which force to apply
+1. **if** $r_{align} < \lvert\lvert p_j - p_i\rvert\rvert < r_{c}$ then apply cohesion force, otherwise:
+2. **if** $r_s < \lvert\lvert p_j - p_i\rvert\rvert < r_{align}$ then apply alignment force, otherwise:
+3. **if** $\lvert\lvert p_j - p_i\rvert\rvert < r_s$ then apply separation force.
 
-## Position Update Method
-For this assignment the Semi-implicit Euler method was used to update the positions and velocities of each mass:$$\vec{v}(t+\Delta{t}) = \vec{v}(t) + \frac{\vec{F}}{m}\cdot \Delta{t}  $$ $$\vec{x}(t+\Delta{t}) = \vec{x}(t) + \vec{v}({t+\Delta{t}})\Delta{t}$$
-Where $\vec{F}$ is the total force on the mass being updated in [N], $m$ is the mass of the current mass, $\Delta{t}$ is the time step size in [s], $\vec{v}(t)$ is the velocity of the mass at time $t$ in [m/s], $\vec{v}(t + \Delta{t})$ is the velocity of the mass at time $t + \Delta{t}$, $\vec{x}(t)$ is the position of the mass at time $t$ in [m], $\vec{x}(t+\Delta{t})$ is the position of the mass at time $t+\Delta{t}$.
+This method prevents the forces from "fighting" each other.
+### normalizing
+A boid may have an arbitrary number of neighbors. To avoid having to adjust the force constants depending on the number of neighbors, the forces/accelerations are normalized by the number of neighbors:$$a_{i}^{total} = \frac{1}{N}\sum_{j=0}^N (a^s_{ij} + a^{align}_{ij} + a^c_{ij})$$
+Where N is the number of neighbors of boid i.
+### clamping the forces
+Finally, to ensure the acceleration is reasonable it is clamped between zero and some maximum acceleration. This also handles the case of NAN or Infinite values.
+## Position Integration Method:
+For this assignment the Semi-implicit Euler method was used to update the positions and velocities of each boid:$$\vec{v}(t+\Delta{t}) = \vec{v}(t) + a_{i}^{total} \Delta{t}  $$ $$\vec{x}(t+\Delta{t}) = \vec{x}(t) + \vec{v}({t+\Delta{t}})\Delta{t}$$
+Where $\Delta{t}$ is the time step size in [s], $\vec{v}(t)$ is the velocity of the boid at time $t$ in [m/s], $\vec{v}(t + \Delta{t})$ is the velocity of the boid at time $t + \Delta{t}$, $\vec{x}(t)$ is the position of the boid at time $t$ in [m], $\vec{x}(t+\Delta{t})$ is the position of the boid at time $t+\Delta{t}$.\
+In the simulation, the velocity magnitude is clamped to some maximum speed value. The position is clamped between the bounds of the simulation volume.
 $$$$
-## Linear Viscous Air Damping
-Because the spring damping only adds damping in the direction of the displacement between the two masses, it does not add damping to motion perpendicular to the spring, nor does it damp bulk motion of the connected masses. Without damping in these directions, the simulation could potentially become unstable. To prevent this we add damping against the motion of the masses. This can be thought of as linear viscous air damping (though forces from air are highly complex and non linear in reality). The force added to each mass is calculated using:$$\vec{F_{air}} = -k_a \cdot \vec{v}$$
-Where $\vec{F_{air}}$ is the damping force on the mass in [N], $k_a$ is the air damping coefficient [N*s/m], $\vec{v}$ is the velocity of the mass in [m/s]. 
-## Model 1: Mass on a Spring
-The mass on spring model is simply two masses connected by one spring in a gravity field, one with fixed position. The motion of the non fixed mass is driven by calculating the spring force on it, adding the "force" of gravity then updating the position and velocity using the Semi-implicit Euler method.
-## Chain Pendulum
-The Chain Pendulum model is a chain of masses connected by springs in a gravity field. Viscous air damping is also present in this model to prevent the model from swaying indefinitely.  
-## Cube of Jelly
-The Cube of Jelly is a 3D array of masses in a gravity field, the masses are connected by springs to their neighbors, linear viscous damping is present, Collisions are resolved using the impulse method with friction. \
-The connections between masses are setup such that each mass $m_i$ has a spring connecting it to any neighbor within a radius, that is any masses $m_j, m_i$ satisfying $ \lvert\lvert P_i - P_j\rvert\rvert < R$ have a spring between them. It was found to be advantageous to set the radius $R$ large enough such that masses are connected to masses that are located at least 2 indices over, rather than just the immediate neighbors, as this helps to prevent the cube from inverting on itself.  
-### Collision Handling
-The Cube of jelly must collide with the ground. The interaction between the ground and the cube of jelly was accomplished using the following methods. \
-**Collision Detection:** \
-Each mass $i$ stores its current position $\vec{x_i}(t)$ and previous position $\vec{x_i}(t + \Delta{t})$. We assume the ground is the $y=0$ plane. During each update, we check each mass. If the current position of the mass is bellow $y=0$ and the previous position was above $y=0$. Then that mass has hit the ground.\
-**Collision Resolution:** \
-For collision resolution, we use the equations presented in the lecture material "Collisions Slides".
-If a collision is detected, we know the collision normal is the $y$ axis $[0,1,0]$. The mass of the ground is assumed to be infinite so the resulting velocity in the $y$ direction simplifies to: $$-e \cdot v_y$$
-Where $e$ is the coefficient of restitution, and $v_y$ is the velocity in the y direction. \
-The magnitude (direction of the tangential velocity remains unchanged after the collision so only the magnitude is important here) of the new tangential velocity is calculated as: $$V_{t} = max( (v_t - c_f \cdot \Delta{v_y}), 0) $$
-Where $V_t$ is the magnitude of the new tangential velocity. $\Delta{v_y}$ is the change in $y$ velocity from the collision. $c_f$ is the coefficient of friction. $v_t$ is the old magnitude of the tangential velocity. \
-For simplicity, the position in the y direction is just set to 0 if a collision is detected (this was found to prevent the cube inverting on itself, since vertices were not being shoved deep into the cube in a collision update).   
-
-## Hanging Cloth
-The Hanging Cloth model is a 2-D array of masses in a gravity field with springs connecting masses to their neighbors and two corners fixed. The model also includes springs to prevent out of plane bending, and linear air resistance. 
-## Flag Model
-The flag model is nearly identical to the hanging cloth with one exception. The forces of air on on the model is different:
-### Flag Aerodynamic Forces
-The faces of the flag are defined as triangles, each triangle having corners defined by 3 masses we will denote as $\brace m_a, m_b, m_c \rbrace$. \
-Suppose $\vec{v_i} = \frac{1}{3} \cdot(\vec{v_a} + \vec{v_b} + \vec{v_c})$ is the average velocity of the triangle. \
-The velocity of the air is $\vec{U_{air}}$. \
-The relative velocity between the air and the face is then: $\vec{v_r} = \vec{U_{air}} - \vec{v_i}$.
-
-The force of air on an object is proportional to: \
-(1) The area of the object, in the case of this model we use the cross product rule to calculate the area $A$ of each triangle face as: $$ \vec{d_{ba}} = \vec{P_b} - \vec{P_a}$$
-$$\vec{d_{ca}} = \vec{P_c} - \vec{P_a}$$
-$$ A = \frac{1}{2}\lvert\lvert d_{ba} \times d_{ca}\rvert\rvert$$
-$$ \vec{N} = \frac{d_{ba} \times d_{ca}}{\lvert\lvert d_{ba} \times d_{ca}\rvert\rvert}$$
-(2) The specific force is the momentum transported by the air to the object. First we calculate the amount of momentum carrying mass interacting with the surface as being proportional to the density $\rho$ of the air multiplied by the relative speed $v_{r}$ of the air $$\lvert\lvert \vec{v_{r}}\rvert\rvert * \rho$$
-(3) The amount of momentum each piece of mass of air deposits on the object (The change in velocity of the air). Here we split the forces into a normal and tangent component, since the velocity normal to the surface will be changed by much more than the velocity tangent to a surface: $$\vec{V_n} = (\vec{V_r}\cdot \vec{N})\vec{N}$$ $$\vec{V_t} = \vec{V_r} - \vec{V_n}$$
-The factors by which the velocity changes in each of these directions will be denoted as $C_{Dn}$ for the normal direction, and $C_{Dt}$ for the tangent direction.\
-Combining these factors gives the forces as: $$\vec{F_n} = C_{Dn} \rho A \lvert\lvert \vec{v_{r}}\rvert\rvert \vec{V_n}$$ $$\vec{F_t} = C_{Dt} \rho A \lvert\lvert \vec{v_{r}}\rvert\rvert \vec{V_t}$$
-For simplicity. By basic intuition of how air works, we will assume that the air nearly stops when it hits in the normal direction, but continues to slide along the surface in the tangent direction. So we chose a $C_{Dn}$ that is much larger than $C_{Dt}$. \
-If this model is an accurate enough model of the fluid surface interaction, then the flag should naturally oscillate when the wind speed is high enough (We have intentionally not added forced turbulence, as this model gives a much more natural look to the waving motion of the flag)        
-## Cloth Falling on Table
-The cloth falling on table model uses the hanging cloth combined with the collision resolution system from the Cube of Jelly. The ground is modified to only detect collisions within a radius R of the origin. This produces the collision of a circular table top.
-## Inextensible Chain
-The Inextensible Chain is a modification of the Chain Pendulum Model. Instead of connecting the masses with springs, the DFTL algorithm from [Müller M, Kim TY, Chentanez N. Fast Simulation of Inextensible Hair and Fur. VRIPHYS. 2012 May;12:39-44.] is used to update the masses. The algorithm is executed as follows.
-
-1. Calculate an initial estimate of for the new positions of the masses based on gravity and linear air damping forces:$$\vec{x_i}(t+\Delta{t}) \leftarrow \vec{x_i}(t) + \vec{v}({t})\Delta{t} + \vec{a}*\Delta{t}^2$$
-2. calculate FTL (Follow the leader) correction: $$\vec{d_i} = (p_i - p_{i-1}) \left( \frac{R}{\lvert\lvert p_i - p_{i-1} \rvert\rvert} - 1\right)$$
-3. calculate the new position:$$\vec{x_i}(t+\Delta{t}) \leftarrow \vec{x_i}(t+\Delta{t}) + \vec{d_i}$$
-4. calculate the velocity correction:$$\vec{v_i}(t+\Delta{t}) = \frac{\vec{x_i}(t+\Delta{t}) - \vec{x_i}(t)- s_{damping} \cdot \vec{d_{i-1}}}{\Delta{t}}$$
-
-In testing this solution is stable for values of $s_{damping}$ very near 1.
+## Steering around infinite Planes
+Avoiding planes is done using two methods. (1) steering for when the boid is far from the plane, (2) repulsion force if the boid gets too close to the plane.
+### Repulsion
+A plane has an offset distance $\epsilon$. If the boid gets within this distance of the plane, then repulsion force is used. For this simulation, the repulsion force is just set to some maximum allowed acceleration to prevent the boid from impacting the plane. The acceleration is calculated as follows: $$a_{repulsion} = k_{max} \cdot \hat{n}$$
+Where $k_{max}$ is the maximum acceleration factor, and $\hat{n}$ is the normal of the plane.
+### Steering
+The steering method for avoiding planes is identical to that outlined in "Assignment 5 - Technical Specifications". The basic algorithm is as follows:
+1. Check if the plane is within the detection radius of the boid, we use the maximum of the three radii for detecting if the plane is in the detection range of the boid $max(r_{a}, r_{align}, r_{c})$.
+2. Check if the boid is current pointed towards the plane using the velocity vector dotted with the normal to determine if it is facing the plane $v_i \cdot \hat{n} < 0$
+3. Check if it is within the offset of the plane, if so implement the repulsion force
+4. Calculate the acceleration direction as the component of the plane normal that is tangent to the velocity vector: $$\hat{a}_c = \frac{\hat{n} - (\hat{n}\cdot\hat{v})\hat{v}}{\lvert\lvert\hat{n} - (\hat{n}\cdot\hat{v})\hat{v}\rvert\rvert}$$
+5. Use equation for the radius given by "Assignment 5 - Technical Specifications" to calculate the steering radius.$$r = \frac{(P-C)\cdot \hat{n} - \epsilon}{1 - \hat{a}_c\cdot\hat{n}}$$
+6. Use the steering radius and current velocity to calculate the required acceleration: $$\vec{a}_c = \frac{\lvert\lvert\vec{v}\rvert\rvert^2}{r}\hat{a}_c$$
+In the simulation implementation, checks are made to avoid the scenario where the boid is pointed directly at the plane normal, and therefore does not have a valid acceleration direction. To avoid this a random vector is given as the acceleration direction.
+## Steering around Spheres
+Avoiding Spheres is done using the same two methods as planes. (1) steering for when the boid is far from the sphere, (2) repulsion force if the boid gets too close to the sphere.
+### Repulsion
+A sphere has an offset distance $\epsilon$. If the boid gets within this distance of the sphere, then repulsion force is used. For this simulation, the repulsion force is just set to some maximum allowed acceleration to prevent the boid from impacting the sphere. The acceleration is calculated as follows: $$a_{repulsion} = k_{max} \cdot (P-C)$$
+Where $k_{max}$ is the maximum acceleration factor, and $P-C$ is direction vector from the sphere center to the boid.
+### Steering
+The steering method for avoiding sphere is identical to that outlined in "Assignment 5 - Technical Specifications". The basic algorithm is as follows:
+1. Check if the sphere is within the detection radius of the boid, we use the maximum of the three radii for detecting if the sphere is in the detection range of the boid $max(r_{a}, r_{align}, r_{c})$.
+2. Check if the boid is current pointed away from the sphere using the velocity vector dotted with the displacement $P-C$ to determine if it is facing the sphere $v_i \cdot (P-C) < 0$
+3. Check to see if the trajectory intersects the sphere using the identity:$$ b^2 = \lvert\lvert P-C \rvert\rvert^2 - (\vec{v}\cdot(P-C))^2$$ Where if $b$ is greater than $R+\epsilon$ ($R$ being the sphere radius) then the boid will miss the sphere. 
+4. Check if it is within the offset of the sphere, if so implement the repulsion force
+5. Calculate the acceleration direction as the component of the plane normal that is tangent to the velocity vector: $$\hat{a}_c = \frac{\hat{v} - (\hat{v}\cdot(P-C))(P-C)}{\lvert\lvert \hat{v} - (\hat{v}\cdot(P-C))(P-C) \rvert\rvert}$$
+6. Use equation for the radius given by "Assignment 5 - Technical Specifications" to calculate the steering radius.$$r = \frac{\lvert\lvert(P-C)\rvert\rvert^2 - (R+\epsilon)^2}{2 ((R+\epsilon) - (P-C)\cdot \hat{a}_c)}$$
+7. Use the steering radius and current velocity to calculate the required acceleration: $$\vec{a}_c = \frac{\lvert\lvert\vec{v}\rvert\rvert^2}{r}\hat{a}_c$$
+In the simulation implementation, checks are made to avoid the scenario where the boid is pointed directly at the sphere center, and therefore does not have a valid acceleration direction. To avoid this a random vector is given as the acceleration direction.
+## Orienting Boids
+The rotation of the boids are calculated using the frenet frame. First the tangent vector is calculated as the normalized velocity vector $T = v / \lvert\lvert v \rvert\rvert$. The Normal is calculated by finding total acceleration vector and taking its component that is perpendicular to the velocity. The acceleration due to gravity is added to get the total acceleration: $\vec{a} = \vec{a}_{raw} - \vec{g}$. Then we get the component of this acceleration that is perpendicular to the velocity $\vec{a}_{perp} = \vec{a} - (\vec{a} \cdot \vec{T})\vec{T}$. This vector is normalized to get the normal for the rotation matrix $N = \vec{a}_{perp} / ||\vec{a}_{perp}||$. This can then be used to get the Binormal $B = N \times T$. These vectors then form the rotation matrix used to orient the boid.
+## Detecting Neighbors: Uniform grid for the broad phase
+The simulation uses a uniform grid for the broad phase in finding potential neighbor boids. This Method divides the grid into regularly spaces cubic cells of side length $c$. In our simulation, c is set to the detection radius for cohesion $r_c$ as this means that a neighbor can be at most 1 cell away from the current boid while minimizing the cell size and therefore number of boids in each cell. The cell that a boid belongs to is found by taking the position of a boid and dividing it by the cube size. The cell index is found by: $$x_{index} = \lfloor{x_{boid} - O_x/ c}\rfloor$$
+$$y_{index} = \lfloor{y_{boid} - O_y/ c}\rfloor$$
+$$z_{index} = \lfloor{z_{boid} - O_z/ c}\rfloor$$
+$$ cell_{index} = x_{index}N_yN_z + y_{index}N_z + z_{index}$$
+Where $N_x,N_y$ are the number of cells in the x and y directions. $O_x, O_y, O_z$ is the origin of the grid. $x_{boid}, y_{boid}, z_{boid}$ is the position of the boid.
+This grid is used in the following way: after every update, each boid is hashed and added to the boid list of its cell, along with the 26 neighboring cells. During the update, each cell only needs to consider the boids in its cell since its cells boid list also contains the boids that are in the 26 neighboring cells. 
+## Bonus 3 Entry: Simulation Speed Up Tricks
+I Opt-in to the competition for bonus 3
+### Multi-Threaded Simulation
+The force calculation, velocity update, and position update is multi-threaded. The boids are equally split among a given number of threads. 
+### Rendering thread Running parallel to the simulation
+The task of calculating the orientation matrix and adding the render instance for each boid is handled by a set of rendering threads. These threads run in parallel to the Simulation threads. This is accomplished by having a 3-buffer array of boids. One boid array is updated by the simulation threads, A second boid array holds the result of the most recent complete simulation step, and the Third boid array holds results of the second most recent simulation step. These buffers are swapped when a simulation step is completed, the oldest values being assigned as the new array for updating. This system allows the render threads to read from the results and draw the boids while the simulation updates a new batch of results in parallel. 
+### Max Neighbors
+To avoid the scenario of calculating the boid forces of an extremely large number of neighbors, we place a maximum number of neighbors to consider after which no new boid forces are added in a given simulation step. This is based on the assumption that if a boid is surrounded by a large number of neighbors, then the average direction of the force form these neighbors can be approximated by a random sampling of a subset of neighbors. Also, since the force is normalize by the number of neighbors, this also should not effect the magnitude of the force by much.
+### Position Super Sampling
+Because the simulation uses three boid data buffers, two of which store the results of the last two most recent simulation steps. This allows the renderer to update at a faster updated rate than the simulation and simply interpolate values between the two most recent results Example $$p(t) = \frac{t-t_{start}}{t_{end} - t_{start}}(p_{end} - p_{start}) + p_{start}$$
+The accelerations, velocities, and positions are also low pass filtered to prevent sudden changes in orientation when the buffers are swaped.
 # Usage
 ## Building and Running
 To quickly build and run the program it is advised to run the provided shell scripts using the command:
 "./QuickBuild.sh" or "./CleanBuild.sh" these will build and run the program in a single command. \
-**Building**: To build the program navigate to the directory containing "src", "models", "libs", "CMakeLists.txt". Run the command "cmake -B build", then run the command "cmake --build build". The executable will be named "cpsc587_a4_hh" \
-**Running**: Run the command "./build/cpsc587_a4_hh" 
+**Building**: To build the program navigate to the directory containing "src", "models", "libs", "CMakeLists.txt". Run the command "cmake -B build", then run the command "cmake --build build". The executable will be named "cpsc587_a5_hh" \
+**Running**: Run the command "./build/cpsc587_a5_hh" 
 ## Controls
-* **Show Wireframe:** This input is available in the "Cube of Jelly", "Hanging Cloth", "Flag in Wind", and "Table Cloth" models, it switches the view to show the springs and masses in the model.
-* **Show Masses:** In the "Inextensible Rope" model, this input shows the locations of masses on the rope.
-* **Wind Velocity:** In the "Flag in Wind" model, this input allows the user to control the direction of and speed of the wind hitting the flag. 
-* **Reset View:** This input remains unchanged from the example code.
-* **Iterations Per Frame** This input remains unchanged from the example code.
-* **Model:** This input remains unchanged from the example code.
-* **Play Simulation:** This input remains unchanged from the example code.
-* **Reset Simulation:** This input remains unchanged from the example code.
-* **Step Simulation:** This input remains unchanged from the example code.
-* **Simulation dt (s):** This input remains unchanged from the example code.
+* **Play Simulaiton** Starts the simulation.
+* **Reset Simulation** Resets the boid positions to random positions.
+
+**!!NOTICE!!** The following controls do not take effect unless **Apply Settings** is pressed, this is because most variables effect the data structures of the simulation and require restarting the simulation.
+* **Number of boids** Set the number of boids in the simulation
+* **Angle detection separation** The field of view angle for separation
+* **Angle detection Alignment** The field of view angle for alignment
+* **Angle detection cohesion** The field of view angle for cohesion
+* **Radius separation** The detection radius for separation
+* **Radius Alignment** The detection radius for alignment
+* **Radius cohesion** The detection radius for cohesion
+* **k separation** The force constant for separation
+* **k alignment** The force constant for alignment
+* **k cohesion** The force constant for cohesion
+* **surface offset** set the surface offset constant (for both planes and spheres)
+* **Max speed** the maximum speed bound for the boids
+* **Max acceleration** the maximum acceleration bound for the boids
+* **bounds** The bounds of the simulation volume (not that the simulation volume is from -bound to +bound)
+* **Number of spheres** The number of spheres
+* **Sphere max radius** The maximum sphere radius
+* **Sphere min radius** The minimum sphere radius
+* **Apply settings** Restarts the simulation using all the settings above
+* **Setup Scenario 100,000** Pre sets up a scenario with 100,000 boids
+* **Setup Scenario EXTREME** Pre sets up the scenario for the competition

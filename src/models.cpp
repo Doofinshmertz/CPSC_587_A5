@@ -1,3 +1,12 @@
+/**
+ * CPSC 587 W26 Assignment 5
+ * @name Holden Holzer
+ * @email holden.holzer@ucalgary.ca
+ *
+ * Modified from provided Assignment 5 - Boilerplate
+ * @authors Copyright 2019 Lakin Wecker, Jeremy Hart, Andrew Owens and Others (see AUTHORS)
+ */
+
 #include "models.hpp"
 #include <random>
 #include <stdio.h>
@@ -348,34 +357,39 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 										// the velocity normal
 										glm::vec3 v_n = boid->v / v_m;
 
-										// the normal of the plane
-										glm::vec3 n = plane->normal;
-
-										// the acceleration normal
-										glm::vec3 a = n - glm::dot(v_n, n) * v_n;
-										float mag = a.x * a.x + a.y * a.y + a.z * a.z;
-										// if velocity is pointing directly at the normal, choose a different vector to get it out of this scenario
-										if (mag < 0.0001f)
+										// if the boid is facing away from the plane then don't bother steering
+										float direction = -glm::dot(v_n, plane->normal);
+										if(direction > 0)
 										{
-											a = glm::vec3(n.y, n.z, n.x);
-											mag = a.x * a.x + a.y * a.y + a.z * a.z;
+											// the normal of the plane
+											glm::vec3 n = plane->normal;
+
+											// the acceleration normal
+											glm::vec3 a = n - glm::dot(v_n, n) * v_n;
+											float mag = a.x * a.x + a.y * a.y + a.z * a.z;
+											// if velocity is pointing directly at the normal, choose a different vector to get it out of this scenario
+											if (mag < 0.0001f)
+											{
+												a = glm::vec3(n.y, n.z, n.x);
+												mag = a.x * a.x + a.y * a.y + a.z * a.z;
+											}
+
+											mag = glm::sqrt(mag);
+											a = a / mag;
+
+											// now calculate the radius
+											// the displacement vector
+											glm::vec3 disp = boid->p - plane->point;
+
+											float r = (glm::dot(disp, n) - offset) / (1.0f - glm::dot(a, n));
+
+											float a_m = v_m * v_m / r;
+											if (std::isnan(a_m) || std::isinf(a_m) || a_m > max_acc)
+											{
+												a_m = max_acc;
+											}
+											acc_obs += a * a_m;
 										}
-
-										mag = glm::sqrt(mag);
-										a = a / mag;
-
-										// now calculate the radius
-										// the displacement vector
-										glm::vec3 disp = boid->p - plane->point;
-
-										float r = (glm::dot(disp, n) - offset) / (1.0f - glm::dot(a, n));
-
-										float a_m = v_m * v_m / r;
-										if (std::isnan(a_m) || std::isinf(a_m) || a_m > max_acc)
-										{
-											a_m = max_acc;
-										}
-										acc_obs += a * a_m;
 									}
 								}
 								//printf("tr: %lu, checkpoint 7\n", thread_id);

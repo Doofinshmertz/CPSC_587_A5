@@ -1,3 +1,12 @@
+/**
+ * CPSC 587 W26 Assignment 5
+ * @name Holden Holzer
+ * @email holden.holzer@ucalgary.ca
+ *
+ * Modified from provided Assignment 5 - Boilerplate
+ * @authors Copyright 2019 Lakin Wecker, Jeremy Hart, Andrew Owens and Others (see AUTHORS)
+ */
+
 #include "imgui_panel.hpp"
 
 namespace imgui_panel {
@@ -96,7 +105,6 @@ namespace imgui_panel {
 				ImGui::Spacing();
 
 				ImGui::DragFloat("surface offset distance", &offset, 0.01f, 0.0f, 100.0f);
-				ImGui::DragFloat("k repulsion", &k_repulsion, 0.01f, 0.0f, 10.0f);
 				ImGui::Spacing();
 
 				ImGui::DragFloat("Max speed", &max_speed, 0.1f, 1.0f, 100.0f);

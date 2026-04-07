@@ -1,4 +1,14 @@
-﻿#include "givio.h"
+﻿/**
+ * CPSC 587 W26 Assignment 5
+ * @name Holden Holzer
+ * @email holden.holzer@ucalgary.ca
+ *
+ * Modified from provided Assignment 5 - Boilerplate
+ * @authors Copyright 2019 Lakin Wecker, Jeremy Hart, Andrew Owens and Others (see AUTHORS)
+ */
+
+
+#include "givio.h"
 #include "givr.h"
 
 #include <glm/gtc/matrix_transform.hpp>
