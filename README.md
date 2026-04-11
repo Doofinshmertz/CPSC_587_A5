@@ -85,15 +85,15 @@ $$ cell_{index} = x_{index}N_yN_z + y_{index}N_z + z_{index}$$
 Where $N_x,N_y$ are the number of cells in the x and y directions. $O_x, O_y, O_z$ is the origin of the grid. $x_{boid}, y_{boid}, z_{boid}$ is the position of the boid.
 This grid is used in the following way: after every update, each boid is hashed and added to the boid list of its cell, along with the 26 neighboring cells. During the update, each cell only needs to consider the boids in its cell since its cells boid list also contains the boids that are in the 26 neighboring cells. 
 ## Bonus 3 Entry: Simulation Speed Up Tricks
-I Opt-in to the competition for bonus 3
+I Opt-in to the competition for bonus 3. Please note that the simulation time step and the render time step have separeate outputs. The framerate of the simulation time step is given by the **Simulation Frame rate** output. The percent of frames less than 20FPS has been adjusted to count the simulation frames bellow 20 FPS **NOT** the render loop frame rate.
 ### Multi-Threaded Simulation
 The force calculation, velocity update, and position update is multi-threaded. The boids are equally split among a given number of threads. 
 ### Rendering thread Running parallel to the simulation
 The task of calculating the orientation matrix and adding the render instance for each boid is handled by a set of rendering threads. These threads run in parallel to the Simulation threads. This is accomplished by having a 3-buffer array of boids. One boid array is updated by the simulation threads, A second boid array holds the result of the most recent complete simulation step, and the Third boid array holds results of the second most recent simulation step. These buffers are swapped when a simulation step is completed, the oldest values being assigned as the new array for updating. This system allows the render threads to read from the results and draw the boids while the simulation updates a new batch of results in parallel. 
 ### Max Neighbors
-To avoid the scenario of calculating the boid forces of an extremely large number of neighbors, we place a maximum number of neighbors to consider after which no new boid forces are added in a given simulation step. This is based on the assumption that if a boid is surrounded by a large number of neighbors, then the average direction of the force form these neighbors can be approximated by a random sampling of a subset of neighbors. Also, since the force is normalize by the number of neighbors, this also should not effect the magnitude of the force by much.
+To avoid the scenario of calculating the boid forces of an extremely large number of neighbors, we place a maximum number of neighbors to consider, N,  after which no new boid forces are added in a given simulation step. This is based on the assumption that if a boid is surrounded by a large number of neighbors, then the average direction of the force form these neighbors can be approximated by a random sampling of a subset of neighbors. The simulation choses the N closest neighbors by partialy sorting the top N values in the arry by their distance to the current node.
 ### Position Super Sampling
-Because the simulation uses three boid data buffers, two of which store the results of the last two most recent simulation steps. This allows the renderer to update at a faster updated rate than the simulation and simply interpolate values between the two most recent results Example $$p(t) = \frac{t-t_{start}}{t_{end} - t_{start}}(p_{end} - p_{start}) + p_{start}$$
+(I am aware this is not counted for the simulation speed up, however, its pretty cool and can allow smooth rendering up to 500,000 boids) Because the simulation uses three boid data buffers, two of which store the results of the last two most recent simulation steps. This allows the renderer to update at a faster updated rate than the simulation and simply interpolate values between the two most recent results Example $$p(t) = \frac{t-t_{start}}{t_{end} - t_{start}}(p_{end} - p_{start}) + p_{start}$$
 The accelerations, velocities, and positions are also low pass filtered to prevent sudden changes in orientation when the buffers are swaped.
 # Usage
 ## Building and Running
@@ -125,4 +125,4 @@ To quickly build and run the program it is advised to run the provided shell scr
 * **Sphere min radius** The minimum sphere radius
 * **Apply settings** Restarts the simulation using all the settings above
 * **Setup Scenario 100,000** Pre sets up a scenario with 100,000 boids
-* **Setup Scenario EXTREME** Pre sets up the scenario for the competition
+* **Setup Scenario 120,000** Pre sets up a scenario with 120,000 boids (this is about the limit of the lab machines for maintaining a simulation framerate above 20 FPS)

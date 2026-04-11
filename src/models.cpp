@@ -260,21 +260,17 @@ void BoidSimulation::UpdateHashGrid()
 				for (int z = -1; z <= 1; z++)
 				{
 					int32_t key = (cell_index + x * x_fact + y * y_fact + z) % num_cells;
-					if(hash_grid[key].size() < MAX_NEIGHBORS)
-					{
-						hash_grid[key].push_back(i);
-					}
+					hash_grid[key].push_back(i);
 				}
 			}
 		}
-		
 	}
 }
 
 void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 {
-	size_t start = sim_tasks[thread_id].start_index;
-	size_t end = sim_tasks[thread_id].end_index;
+	uint32_t start = sim_tasks[thread_id].start_index;
+	uint32_t end = sim_tasks[thread_id].end_index;
 
 	if(end == start){return;}
 
@@ -287,7 +283,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 	// detection distance for boids
 	float boid_detect_r = max_r * max_r;
 
-	for(size_t i = start; i < end; i++)
+	for(uint32_t i = start; i < end; i++)
 	{
 
 		//printf("tr: %lu, checkpoint 1\n", thread_id);
@@ -485,48 +481,131 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		// printf("tr: %lu, checkpoint 9.2\n", thread_id);
 		// std::cout << std::flush;
 
-		//  count the number of neighbors
-		int32_t num_neighbors = 0;
-		
-		
-		
-		//printf("tr: %lu, checkpoint 10\n", thread_id);
-		//std::cout << std::flush;
+		// printf("tr: %lu, checkpoint 10\n", thread_id);
+		// std::cout << std::flush;
 
-		
+		//   count the number of neighbors
+		int32_t num_neighbors = 0;
+
 		std::vector<uint32_t>* neighbors = &hash_grid[(boid->cell_index) % num_cells];
 
 		glm::vec3 acc_bo(0.0f, 0.0f, 0.0f);
 		size_t n = neighbors->size();
+
+		
+		// get the closest neighbors
+		uint32_t closest[MAX_NEIGHBORS];
+		// the distances of the closest neighbors
+		float distances[MAX_NEIGHBORS];
+		// if the number of neighbors is less than max neighbors then just copy over
+		if(n <= MAX_NEIGHBORS)
+		{
+			//printf("boid %lu n < max_neighbors at cell index: %lu\n", i, (boid->cell_index) % num_cells);
+			for(size_t j = 0; j < n; j++)
+			{
+				closest[j] = (*neighbors)[j];
+			}
+		}
+		else
+		{
+			//printf("boid %lu has %lu neighbors to start at cell index %lu\n", i, n, (boid->cell_index) % num_cells);
+			// otherwise, get the MAX_NEIGHBORS closest neighbors
+			glm::vec3 position = boid->p;
+			// start by filling the distances array with max_r_values
+			float max_r_sqr = max_r*max_r;
+			for(size_t j = 0; j < MAX_NEIGHBORS; j++)
+			{
+				distances[j] = max_r_sqr;
+				// boid forces will not be calculated agianst it's self, so this is the default value
+				closest[j] = i;
+			}
+
+			for(size_t j = 0; j < n; j++)
+			{
+				uint32_t id = (*neighbors)[j];
+				// do not add ourself
+				if(id == i){continue;}
+				glm::vec3 disp = (*boids_end)[id].p - position;
+				float dist_sqr = disp.x*disp.x + disp.y*disp.y + disp.z*disp.z;
+
+				// if this is greater than the distance of the largest value, then move on
+				if(dist_sqr > distances[0]){continue;}
+				// otherwise advance
+				size_t place_index = 0;
+				// place this distance and index in the arrays so that they are sorted
+				for(size_t k = 1; k < MAX_NEIGHBORS; k++)
+				{
+					// if this is greater than the next distance, then we are placed at k-1
+					if(dist_sqr > distances[k]){break;}
+
+					//std::cout << " adding neighbor " << id << std::endl;
+					closest[k-1] = closest[k];
+					distances[k-1] = distances[k];
+					place_index = k;
+				}
+
+				closest[place_index] = id;
+				distances[place_index] = dist_sqr;
+			}
+
+			n = MAX_NEIGHBORS;
+		}
+		
+
 		for(size_t j = 0; j <n; j++)
 		{
-			// if the number of neighbors exceeds a certian number the stop
-			if (num_neighbors >= MAX_NEIGHBORS)
-			{
-				break;
-			}
-
-			// printf("acc_urg: %f, %f, %f\n", acc_urg.x, acc_urg.y, acc_urg.z);
-			Boid *other = &((*boids_end)[(*neighbors)[j]]);
+			//printf("acc_urg: %f, %f, %f\n", acc_bo.x, acc_bo.y, acc_bo.z);
+			Boid *other = &((*boids_end)[closest[j]]);
 			if(other == boid){continue;}
+			// displacement vector
 			glm::vec3 disp = other->p - boid->p;
 			float dist_sqr = disp.x*disp.x + disp.y*disp.y + disp.z*disp.z;
+			//printf("dist squared: %f\n", dist_sqr);
 			if(dist_sqr < (max_r * max_r))
 			{
-				acc_bo += HandleBoid(boid, other, dist_sqr);
-				num_neighbors++;
+				// cosine view angle
+				float v_m = glm::length(boid->v);
+				float dist = glm::sqrt(dist_sqr);
+				float view_angle = glm::dot(boid->v, disp) / (v_m * dist);
+
+				// do not apply cohesion and separation at the same time
+				// case for cohesion
+				if ((dist > r_sep) && (view_angle > angle_coh))
+				{
+					acc_bo += k_coh * disp;
+				}
+				// case for separation (do not apply cohesion while separating
+				else if (view_angle > angle_sep)
+				{
+					float acc_m = k_sep / (dist_sqr);
+					if (std::isnan(acc_m) || std::isinf(acc_m))
+					{
+						acc_bo += glm::vec3(max_acc, 0.0f, 0.0f);
+					}
+					else
+					{
+						acc_bo += (-1.0f) * disp * acc_m;
+					}
+				}
+
+				// apply alignment
+				if ((dist < r_align) && (view_angle > angle_align))
+				{
+					acc_bo += k_align * (other->v - boid->v);
+				}
+				num_neighbors = num_neighbors + 1;
 			}
 		}
-		
-		glm::vec3 acc = acc_obs;
 
-		if(num_neighbors > 0)
-		{
-			acc += (1.0f / float(num_neighbors)) * acc_bo;
-		}
+		//printf("boid %lu has %lu neighbors to end at cell index %lu\n", i, num_neighbors, (boid->cell_index) % num_cells);
+		//printf("boid has %d neighbors\n", num_neighbors);
+		// add the two accelerations
+		glm::vec3 acc = acc_obs;
+		//printf("boid %lu has boid force %5.1f, %5.1f, %5.1f\n", i, acc_bo.x, acc_bo.y, acc_bo.z);
+		acc += acc_bo;
 		
-		//printf("tr: %lu, checkpoint 12.1\n", thread_id);
-		//std::cout << std::flush;
+
+		
 		// bound the acceleration to a maximum value
 		float acc_m = acc.x * acc.x + acc.y * acc.y + acc.z * acc.z;
 		if (acc_m > (max_acc * max_acc))
@@ -545,6 +624,7 @@ void BoidSimulation::SimulateBoids(size_t thread_id, float dt)
 		{
 			v = v * max_speed / glm::sqrt(v_m);
 		}
+
 		//printf("tr: %lu, checkpoint 14\n", thread_id);
 		//std::cout << std::flush;
 
@@ -715,6 +795,7 @@ glm::vec3 BoidSimulation::HandleSphere(const Boid *boid, const Sphere *sphere, f
 
 glm::vec3 BoidSimulation::HandleBoid(const Boid *boid, const Boid *other, float dist_sqr)
 {
+	
 	// acceleration accumulator
 	glm::vec3 acc(0.0f, 0.0f, 0.0f);
 
@@ -732,17 +813,11 @@ glm::vec3 BoidSimulation::HandleBoid(const Boid *boid, const Boid *other, float 
 		return glm::vec3(0.0f, 0.0f, 0.0f);
 	}
 
+	// do not apply cohesion and separation at the same time
 	// case for cohesion
-	if((dist > r_align) && (view_angle > angle_coh))
+	if((dist > r_sep) && (view_angle > angle_coh))
 	{
 		acc = k_coh * disp;
-		return acc;
-	}
-	// apply alignment
-	else if ((dist > r_sep) && (view_angle > angle_align))
-	{
-		acc = k_align * (other->v - boid->v);
-		return acc;
 	}
 	// case for separation (do not apply cohesion while separating
 	else if(view_angle > angle_sep)
@@ -750,14 +825,21 @@ glm::vec3 BoidSimulation::HandleBoid(const Boid *boid, const Boid *other, float 
 		float acc_m = k_sep / (dist_sqr);
 		if(std::isnan(acc_m) || std::isinf(acc_m))
 		{
-			return glm::vec3(max_acc, 0.0f, 0.0f);
+			acc = glm::vec3(max_acc, 0.0f, 0.0f);
 		}
-
-		acc = (-1.0f) * disp * acc_m;
-		return acc;
+		else
+		{
+			acc = (-1.0f) * disp * acc_m;
+		}
 	}
 
-	return glm::vec3(0.0f, 0.0f, 0.0f);
+	// apply alignment
+	if ((dist < r_align) && (view_angle > angle_align))
+	{
+		acc += k_align * (other->v - boid->v);
+	}
+
+	return acc;
 }
 
 float BoidSimulation::GetDeltatime()
@@ -834,14 +916,16 @@ void BoidSimulation::AddBoidRenderable(size_t thread_id, float interp)
 		// calculate the acceleration
 		glm::vec3 a_avg = (v_end - v_start) * ((1.0f)/ delta_time);
 
-		// low pass filter with previous values
-		a_avg = 0.1f*a_avg + 0.9f*accelerations[i];
-		accelerations[i] = a_avg;
+
 
 		// calculate the new position and velocity
 		p_start = (p_end - p_start)*interp + p_start;
 		v_start = (v_end - v_start)*interp + v_start;
 
+		// low pass filter with previous values (for buttery smooth movement (otherwise, boids can vibrate due to rapid changes in direction, looks realy bad)
+		a_avg = 0.1f * a_avg + 0.9f * accelerations[i];
+		accelerations[i] = a_avg;
+		
 		p_start = 0.1f*p_start + 0.9f*positions[i];
 		positions[i] = p_start;
 
@@ -1118,9 +1202,9 @@ void BoidSimulation::SetupWalls()
 
 void BoidSimulation::SetupSpheres()
 {
-	if(num_spheres < 14)
+	if(num_spheres < 8)
 	{
-		num_spheres = 14;
+		num_spheres = 8;
 	}
 	// resize spheres vector
 	spheres.resize(num_spheres);

@@ -184,7 +184,7 @@ int main(void) {
 
 		if (imgui_panel::play_simulation || imgui_panel::step_simulation) {
 			imgui_panel::n_frames++;
-			if (ImGui::GetIO().DeltaTime > 0.05f) { // Equivalent to < 20 FPS
+			if (model->GetDeltatime() > 0.05f) { // Equivalent to < 20 FPS
 				imgui_panel::n_frames_less_than_20++;
 			}
 		}

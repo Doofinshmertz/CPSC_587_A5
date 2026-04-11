@@ -32,7 +32,7 @@
 #define SIMULATION_THREADS 20
 #define RENDER_THREADS 4
 
-#define MAX_NEIGHBORS 32// the maximum number of neighbors to consider
+#define MAX_NEIGHBORS 12// the maximum number of neighbors to consider
 
 #define X_SIZE 20.0f
 #define Y_SIZE 20.0f
@@ -97,8 +97,8 @@ struct RenderTask
 
 struct CalculationTask
 {
-	size_t start_index;
-	size_t end_index;
+	uint32_t start_index;
+	uint32_t end_index;
 };
 
 class BoidSimulation

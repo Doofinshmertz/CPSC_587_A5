@@ -12,7 +12,7 @@
 namespace imgui_panel {
 	// default values
 	bool showPanel = true;
-	ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+	ImVec4 clear_color = ImVec4(0.0f, 0.025f, 0.45f, 1.00f);
 	bool reset_view = false;
 
 	//Simulation settings
@@ -35,13 +35,13 @@ namespace imgui_panel {
 	float angle_align = 140.0f;
 	float angle_coh = 120.0f;
 
-	float r_sep = 6.0f;
-	float r_align = 8.0f;
-	float r_coh = 10.0f;
+	float r_sep = 10.0f;
+	float r_align = 12.0f;
+	float r_coh = 14.0f;
 
 	float k_sep = 10.0f;
-	float k_align = 2.0f;
-	float k_coh = 0.4f;
+	float k_align = 0.6f;
+	float k_coh = 0.2f;
 	
 	float offset = 1.0f;
 	float k_repulsion = 3.0f;
@@ -56,8 +56,8 @@ namespace imgui_panel {
 
 	float bounds[3] = {100.0f, 100.0f, 100.0f};
 	int num_spheres = 28;
-	float sphere_max_r = 30.0f;
-	float sphere_min_r = 10.0f;
+	float sphere_max_r = 25.0f;
+	float sphere_min_r = 15.0f;
 
 	std::function<void(void)> draw = [](void) {
 		if (showPanel) {
@@ -93,9 +93,9 @@ namespace imgui_panel {
 				ImGui::Spacing();
 
 				// detection radius inputs
-				ImGui::DragFloat("Radius separation", &r_sep, 0.01f, 0.0f, 10.0f);
-				ImGui::DragFloat("Radius Alignment", &r_align, 0.01f, 0.0f, 10.0f);
-				ImGui::DragFloat("Radius cohesion", &r_coh, 0.01f, 0.0f, 10.0f);
+				ImGui::DragFloat("Radius separation", &r_sep, 0.01f, 0.0f, 100.0f);
+				ImGui::DragFloat("Radius Alignment", &r_align, 0.01f, 0.0f, 100.0f);
+				ImGui::DragFloat("Radius cohesion", &r_coh, 0.01f, 0.0f, 100.0f);
 				ImGui::Spacing();
 
 				// acceleration factors
@@ -166,10 +166,10 @@ namespace imgui_panel {
 				ImGui::Separator();
 
 				float frame_rate = ImGui::GetIO().Framerate;
-				ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
+				ImGui::Text("Render Frame rate %.3f ms/frame (%.1f FPS)",
 					1000.0f / frame_rate, frame_rate);
 
-				ImGui::Text("Simulation timestep: %.3f s/frame (%.1f FPS)", sim_delta, (1.0f / sim_delta));
+				ImGui::Text("Simulation Frame rate: %.3f ms/frame (%.1f FPS)", (1000.0f*sim_delta), (1.0f / sim_delta));
 
 				ImGui::Spacing();
 				ImGui::Separator();
@@ -183,9 +183,9 @@ namespace imgui_panel {
 					r_sep = 6.0f;
 					r_align = 8.0f;
 					r_coh = 10.0f;
-					k_sep = 100.0f;
-					k_align = 3.0f;
-					k_coh = 0.4f;
+					k_sep = 10.0f;
+					k_align = 0.4f;
+					k_coh = 0.2f;
 					offset = 1.0f;
 					k_repulsion = 3.0f;
 					max_speed = 20.0f;
@@ -193,24 +193,24 @@ namespace imgui_panel {
 					apply_settings = true;
 					bounds[0] = 200.0f;
 					bounds[1] = 200.0f;
-					bounds[2] = 40.0f;
+					bounds[2] = 100.0f;
 					num_spheres = 40;
 					sphere_max_r = 50.0f;
 					sphere_min_r = 20.0f;
 				}
 
-				if (ImGui::Button("Setup Scenario EXTREME (minimum requirements RTX 3070 + core i7 13700)"))
+				if (ImGui::Button("Setup Scenario 120,000"))
 				{
-					n_boids = 200000;
+					n_boids = 120000;
 					angle_sep = 175.0f;
 					angle_align = 140.0f;
 					angle_coh = 120.0f;
 					r_sep = 6.0f;
 					r_align = 8.0f;
 					r_coh = 10.0f;
-					k_sep = 100.0f;
-					k_align = 3.0f;
-					k_coh = 0.4f;
+					k_sep = 10.0f;
+					k_align = 0.4f;
+					k_coh = 0.2f;
 					offset = 1.0f;
 					k_repulsion = 3.0f;
 					max_speed = 20.0f;
